@@ -63,10 +63,10 @@ def extract_embedding(file_path):
 
 
         # average embeddings across frames
-        features=np.mean(
-            embeddings.numpy(),
-            axis=0
-        )
+        mean_feat = np.mean(embeddings.numpy(), axis=0)
+        max_feat = np.max(embeddings.numpy(), axis=0)
+        std_feat = np.std(embeddings.numpy(), axis=0)
+        features=np.concatenate([mean_feat, max_feat, std_feat])
 
         return features
 
