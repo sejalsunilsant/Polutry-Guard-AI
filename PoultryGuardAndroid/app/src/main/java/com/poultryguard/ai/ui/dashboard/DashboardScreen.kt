@@ -42,13 +42,19 @@ import com.poultryguard.ai.ui.theme.*
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel,
+    farmerName: String,
     onSensorClick: (SensorReading) -> Unit,
     currentLanguage: AppLanguage,
     onLanguageChanged: (AppLanguage) -> Unit,
+    onNavigateToMortality: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshMortalityCount()
+    }
     
     // Chat bottom sheet states
     var showChatBottomSheet by remember { mutableStateOf(false) }
@@ -118,13 +124,14 @@ fun DashboardScreen(
                 is DashboardUiState.Success -> {
                     DashboardContent(
                         state = state,
+                        farmerName = farmerName,
                         isRefreshing = isRefreshing,
                         onRefresh = { viewModel.refreshData() },
                         onSensorClick = onSensorClick,
                         onSimulateSpike = { viewModel.triggerSimulatedSpike(it) },
-                        onSubmitMortality = { count, symptoms -> viewModel.submitMortalityLog(count, symptoms) },
                         currentLanguage = currentLanguage,
-                        onLanguageChanged = onLanguageChanged
+                        onLanguageChanged = onLanguageChanged,
+                        onNavigateToMortality = onNavigateToMortality
                     )
 
                     // Sliding Bottom Sheet Chat UI Interface
@@ -160,13 +167,14 @@ fun DashboardScreen(
 @Composable
 fun DashboardContent(
     state: DashboardUiState.Success,
+    farmerName: String,
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
     onSensorClick: (SensorReading) -> Unit,
     onSimulateSpike: (String) -> Unit,
-    onSubmitMortality: (Int, List<String>) -> Unit,
     currentLanguage: AppLanguage,
-    onLanguageChanged: (AppLanguage) -> Unit
+    onLanguageChanged: (AppLanguage) -> Unit,
+    onNavigateToMortality: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -222,7 +230,7 @@ fun DashboardContent(
                         )
                     }
                     Text(
-                        text = stringResource("welcome"),
+                        text = "${stringResource("welcome_prefix")}$farmerName",
                         style = Typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -445,287 +453,11 @@ fun DashboardContent(
             }
         }
 
-        // Flock Mortality Management Module
-        item {
-            var deathCount by remember { mutableStateOf(1) }
-            val symptomsList = listOf("Respiratory Snick", "Lethargy", "Loose Droppings", "Sudden Death")
-            val selectedSymptoms = remember { mutableStateListOf<String>() }
-            var submissionSuccess by remember { mutableStateOf(false) }
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = CardSurface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = stringResource("mortality_mgmt"),
-                            style = Typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = TextDark
-                        )
-                        // Live calculated Mortality rate badge
-                        val total = state.birdCount + state.loggedMortalities
-                        val rate = if (total > 0) (state.loggedMortalities.toFloat() / total) * 100 else 0f
-                        Text(
-                            text = "Rate: %.2f%%".format(rate),
-                            style = Typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = if (rate > 1.0f) AlertRed else GreenPrimary,
-                            modifier = Modifier
-                                .background(if (rate > 1.0f) Color(0xFFFFEBEE) else GreenLight, shape = RoundedCornerShape(100.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    if (submissionSuccess) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(120.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Success",
-                                    tint = GreenPrimary,
-                                    modifier = Modifier.size(48.dp)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Mortality Logged Successfully!",
-                                    style = Typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = GreenPrimary
-                                )
-                            }
-                        }
-                        
-                        LaunchedEffect(Unit) {
-                            delay(2000)
-                            submissionSuccess = false
-                            selectedSymptoms.clear()
-                            deathCount = 1
-                        }
-                    } else {
-                        // Count selector
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = stringResource("log_death"),
-                                style = Typography.bodyMedium,
-                                color = TextMedium
-                            )
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(AppBackground)
-                                        .clickable { if (deathCount > 1) deathCount-- },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("-", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextDark)
-                                }
-
-                                Text(
-                                    text = "$deathCount",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextDark,
-                                    modifier = Modifier.padding(horizontal = 8.dp)
-                                )
-
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(AppBackground)
-                                        .clickable { deathCount++ },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("+", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextDark)
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Symptom multi select
-                        Text(
-                            text = stringResource("symptoms"),
-                            style = Typography.labelMedium,
-                            color = TextMedium,
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            symptomsList.take(2).forEach { symptom ->
-                                val active = selectedSymptoms.contains(symptom)
-                                FilterChip(
-                                    selected = active,
-                                    onClick = {
-                                        if (active) selectedSymptoms.remove(symptom)
-                                        else selectedSymptoms.add(symptom)
-                                    },
-                                    label = { Text(symptom, fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            symptomsList.drop(2).forEach { symptom ->
-                                val active = selectedSymptoms.contains(symptom)
-                                FilterChip(
-                                    selected = active,
-                                    onClick = {
-                                        if (active) selectedSymptoms.remove(symptom)
-                                        else selectedSymptoms.add(symptom)
-                                    },
-                                    label = { Text(symptom, fontSize = 11.sp) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Button(
-                            onClick = {
-                                onSubmitMortality(deathCount, selectedSymptoms.toList())
-                                submissionSuccess = true
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(44.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary)
-                        ) {
-                            Text(
-                                text = stringResource("submit_log"),
-                                style = Typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
         // Environmental Controls Integration
         item {
             QuickActionRow(modifier = Modifier.padding(top = 8.dp))
         }
 
-        // Telemetry Simulator / Tester panel
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 16.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = BlueLight.copy(alpha = 0.3f)),
-                border = CardDefaults.outlinedCardBorder().copy(
-                    brush = SolidColor(BlueSecondary.copy(alpha = 0.2f))
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Science,
-                            contentDescription = "Simulator",
-                            tint = BlueSecondary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = stringResource("sim_deck"),
-                            style = Typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = BlueDark
-                        )
-                    }
-                    Text(
-                        text = "Trigger environmental anomalies to test MVVM reactivity, MQTT simulated streams, and AI disease prediction fallbacks.",
-                        style = Typography.labelMedium,
-                        color = TextMedium,
-                        modifier = Modifier.padding(vertical = 6.dp)
-                    )
-                    
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Button(
-                            onClick = { onSimulateSpike("temp") },
-                            colors = ButtonDefaults.buttonColors(containerColor = AlertOrange),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Heat Spike", fontSize = 11.sp, color = Color.White)
-                        }
-
-                        Button(
-                            onClick = { onSimulateSpike("ammonia") },
-                            colors = ButtonDefaults.buttonColors(containerColor = AlertRed),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Ammonia Gas", fontSize = 11.sp, color = Color.White)
-                        }
-
-                        Button(
-                            onClick = { onSimulateSpike("sound") },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Panic Noise", fontSize = 11.sp, color = Color.White)
-                        }
-
-                        Button(
-                            onClick = { onSimulateSpike("reset") },
-                            colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("Reset Live", fontSize = 11.sp, color = Color.White)
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -1043,13 +775,14 @@ fun DashboardContentPreview() {
     PoultryGuardAITheme {   // Replace with your actual theme if different
         DashboardContent(
             state = sampleState,
+            farmerName = "Joe Patterson",
             isRefreshing = false,
             onRefresh = {},
             onSensorClick = {},
             onSimulateSpike = {},
-            onSubmitMortality = { _, _ -> },
             currentLanguage = AppLanguage.ENGLISH,
-            onLanguageChanged = {}
+            onLanguageChanged = {},
+            onNavigateToMortality = {}
         )
     }
 }

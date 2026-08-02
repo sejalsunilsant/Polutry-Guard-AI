@@ -1,2 +1,46 @@
 Polutry-Guard-AI/ML_Models/poultry_cnn_model.h5
 .venv/
+# --- Python Environment & Caches ---
+.venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Environment Secrets & Configs ---
+.env
+local.properties
+
+# --- Android Build Outputs & Caching ---
+**/build/
+.gradle/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# --- IDE Settings ---
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# --- Large Datasets & Archives ---
+*.zip
+*.xlsx
+Polutry-Guard-AI/ML_Models/poultry_cnn_model.h5
+
+# --- OS Specific ---
+.DS_Store
+Thumbs.db
+desktop.ini
+D:\poltry_gard_ai_repo\.venv
+**/build/
+*.class
+*.bin
+*.exe
+*.dex
+*.json
+*.flat
+*.len
+*.pb

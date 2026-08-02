@@ -13,6 +13,8 @@ import com.poultryguard.ai.data.cache.LocalCacheManager
 import com.poultryguard.ai.data.model.ConnectionState
 import com.poultryguard.ai.data.model.SensorReading
 import com.poultryguard.ai.data.model.SensorStatus
+import com.poultryguard.ai.data.model.MortalityRecord
+import com.poultryguard.ai.data.repository.MortalityRepository
 import com.poultryguard.ai.data.mqtt.MqttManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,9 +66,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val _isTyping = MutableStateFlow(false)
     val isTyping: StateFlow<Boolean> = _isTyping.asStateFlow()
 
-    private val diseaseRepository = DiseasePredictionRepository()
-    private val chatRepository = ChatRepository()
+    private val diseaseRepository = DiseasePredictionRepository(application.applicationContext)
+    private val chatRepository = ChatRepository(application.applicationContext)
     private val cacheManager = LocalCacheManager(application.applicationContext)
+    private val mortalityRepository = MortalityRepository(application.applicationContext)
     private var mqttManager: MqttManager? = null
 
     private var currentTemp = 24.2f
@@ -150,6 +153,20 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             cacheManager.cacheLoggedMortalities(deathCount)
             loggedMortalities = cacheManager.getCachedMortalities()
             
+            // Create a complete MortalityRecord with environmental snapshot
+            val record = MortalityRecord(
+                id = java.util.UUID.randomUUID().toString(),
+                deathCount = deathCount,
+                symptoms = if (symptoms.isEmpty()) "Unspecified" else symptoms.joinToString(", "),
+                suspectedCause = "Sudden Death Syndrome", // Default suspect from quick dashboard log
+                timestamp = System.currentTimeMillis(),
+                temperature = currentTemp,
+                humidity = currentHumid,
+                ammoniaLevel = currentAmmonia,
+                soundLevel = currentSound
+            )
+            mortalityRepository.insertRecord(record)
+            
             if (symptoms.isNotEmpty() && symptoms.contains("Respiratory Snick")) {
                 currentPrediction = DiseasePredictionResponse(
                     riskLevel = DiseaseRiskLevel.HIGH,
@@ -203,9 +220,16 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun refreshMortalityCount() {
+        loggedMortalities = cacheManager.getCachedMortalities()
+        updateDashboardState()
+    }
+
     private fun updateDashboardState() {
         val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         val timeStr = dateFormat.format(Date())
+
+        loggedMortalities = cacheManager.getCachedMortalities()
 
         val readings = listOf(
             SensorReading(

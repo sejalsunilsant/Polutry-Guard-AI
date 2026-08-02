@@ -17,6 +17,8 @@ import retrofit2.http.POST
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 // Dedicated models for the Groq Chat Completions API
 data class GroqChatMessage(
@@ -64,48 +66,56 @@ data class ChatResponse(
     val reply: String
 )
 
-interface GroqApiService {
-    @POST("v1/chat/completions")
-    suspend fun getChatCompletion(
-        @Header("Authorization") apiKey: String,
-        @Body request: GroqRequest
-    ): GroqResponse
+
+interface FlaskChatApi {
+    @POST("api/v1/chat")
+    suspend fun getChatCompletion(@Body request: ChatRequest): ChatResponse
 }
 
 class ChatService(private val apiKey: String) {
 
-    private val api: GroqApiService by lazy {
+    private val api: FlaskChatApi by lazy {
         Retrofit.Builder()
-            .baseUrl("https://api.groq.com/openai/")
+            .baseUrl("http://10.0.2.2:5000/")
             .addConverterFactory(GsonConverterFactory.create())
             .build()
-            .create(GroqApiService::class.java)
+            .create(FlaskChatApi::class.java)
     }
 
     suspend fun getResponse(messages: List<GroqChatMessage>): String {
-        return try {
-            val request = GroqRequest(messages = messages)
-            val response = api.getChatCompletion("Bearer $apiKey", request)
-            response.choices.firstOrNull()?.message?.content ?: "No response from AI"
-        } catch (e: Exception) {
-            "Error: ${e.localizedMessage}"
-        }
+        return "Legacy ChatService is deprecated."
     }
 }
 
-class ChatRepository(
-    private val context: Context,
-    private val apiKey: String = BuildConfig.GROQ_API_KEY
-) {
+class ChatRepository(private val context: Context) {
     private val cacheManager = LocalCacheManager(context)
     private val mortalityRepository = MortalityRepository(context)
 
-    private val api: GroqApiService by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://api.groq.com/openai/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(GroqApiService::class.java)
+    private var currentUrl: String = ""
+    private var cachedApi: FlaskChatApi? = null
+
+    private fun getApi(): FlaskChatApi? {
+        val url = cacheManager.getApiBaseUrl()
+        if (url != currentUrl || cachedApi == null) {
+            currentUrl = url
+            cachedApi = try {
+                val okHttpClient = OkHttpClient.Builder()
+                    .connectTimeout(10, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
+                    .writeTimeout(15, TimeUnit.SECONDS)
+                    .build()
+
+                Retrofit.Builder()
+                    .baseUrl(currentUrl)
+                    .client(okHttpClient)
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build()
+                    .create(FlaskChatApi::class.java)
+            } catch (e: Exception) {
+                null
+            }
+        }
+        return cachedApi
     }
 
     suspend fun getAiResponse(
@@ -114,31 +124,15 @@ class ChatRepository(
         context: FarmContext
     ): String {
         return try {
-            if (apiKey.isBlank() || apiKey == "YOUR_GROQ_API_KEY_HERE" || apiKey == "\"\"") {
-                throw Exception("Groq API Key not configured. Using offline fallback.")
-            }
-
-            // 1. Build system prompt with all current and 30-day historical data
-            val systemPrompt = buildSystemPrompt(context)
-
-            // 2. Prepare Groq chat messages list
-            val groqMessages = mutableListOf<GroqChatMessage>()
-            groqMessages.add(GroqChatMessage(role = "system", content = systemPrompt))
-
-            // 3. Map conversation history
-            for (chatMsg in history) {
-                val role = if (chatMsg.sender == "USER") "user" else "assistant"
-                groqMessages.add(GroqChatMessage(role = role, content = chatMsg.text))
-            }
-
-            // 4. Add the current user query
-            groqMessages.add(GroqChatMessage(role = "user", content = message))
-
-            // 5. Send completion request
-            val request = GroqRequest(messages = groqMessages)
-            val response = api.getChatCompletion("Bearer $apiKey", request)
-
-            response.choices.firstOrNull()?.message?.content ?: throw Exception("Received empty response from Groq API")
+            val api = getApi() ?: throw Exception("Retrofit API not initialized.")
+            
+            val request = ChatRequest(
+                message = message,
+                history = history,
+                farmContext = context
+            )
+            val response = api.getChatCompletion(request)
+            response.reply
         } catch (e: Exception) {
             Log.e("PoultryGuardChat", "Error contacting LLM API: ${e.localizedMessage}", e)
             // Premium Local Rule AI fallback to keep operations offline-safe (zero cost)
@@ -213,7 +207,7 @@ class ChatRepository(
             HISTORICAL MORTALITY RECORDS (LAST 30 DAYS):
             $mortalitiesStr
             
-            Be concise, clear, and actionable. Keep your tone professional, supportive, and agricultural-expert focused. Use bullet points and bold formatting where appropriate to make information easily scannable in a mobile interface.Use simple langugage that farmer can understand.
+            Be concise, clear, and actionable. Keep your tone professional, supportive, and agricultural-expert focused. Use bullet points and bold formatting where appropriate to make information easily scannable in a mobile interface.Use simple langugage that farmer can understand.Dont give too lengthy suggections.
         """.trimIndent()
     }
 
@@ -222,13 +216,13 @@ class ChatRepository(
         return when {
             "risk" in msg || "disease" in msg || "health" in msg -> {
                 if (context.currentAmmonia > 20f || context.currentTemperature > 29f) {
-                    " **Local AI Warning**: Ammonia level is elevated (${context.currentAmmonia} ppm). High risk of respiratory Snick infection. Make sure exhaust fans are at full capacity to ventilate."
+                    "🐔 **Local AI Warning**: Ammonia level is elevated (${context.currentAmmonia} ppm). High risk of respiratory Snick infection. Make sure exhaust fans are at full capacity to ventilate."
                 } else {
-                    " **Local AI Audit**: Barn environment is safe. Telemetry shows standard comfort indicators."
+                    "🐔 **Local AI Audit**: Barn environment is safe. Telemetry shows standard comfort indicators."
                 }
             }
             "ammonia" in msg || "gas" in msg -> {
-                " **Local Expert Tip**: Ammonia gas should be kept below 20 ppm. Dry the broiler litter to keep levels within safe parameters."
+                "💨 **Local Expert Tip**: Ammonia gas should be kept below 20 ppm. Dry the broiler litter to keep levels within safe parameters."
             }
             "temp" in msg || "heat" in msg -> {
                 "🌡️ **Local Expert Tip**: Ambient temperature is ${context.currentTemperature}°C. Keep it stable between 21-27°C."
@@ -237,9 +231,9 @@ class ChatRepository(
                 val totalFlock = context.birdCount + context.loggedMortalities
                 if (totalFlock > 0) {
                     val rate = (context.loggedMortalities.toFloat() / totalFlock) * 100
-                    "**Local Expert Tip**: Mortality rate is at %.2f%%. Stable, healthy limits.".format(rate)
+                    "📊 **Local Expert Tip**: Mortality rate is at %.2f%%. Stable, healthy limits.".format(rate)
                 } else {
-                    "**Local Expert Tip**: No birds or mortality recorded yet. Total flock count is zero."
+                    "📊 **Local Expert Tip**: No birds or mortality recorded yet. Total flock count is zero."
                 }
             }
             else -> {

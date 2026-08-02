@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -26,6 +27,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.poultryguard.ai.data.model.UserProfile
 import com.poultryguard.ai.data.model.UserRole
 import com.poultryguard.ai.ui.admin.AdminDashboardScreen
 import com.poultryguard.ai.ui.alerts.AlertsScreen
@@ -39,11 +41,20 @@ import com.poultryguard.ai.ui.theme.LocalAppLanguage
 import com.poultryguard.ai.ui.theme.PoultryGuardTheme
 import com.poultryguard.ai.ui.theme.stringResource
 import com.poultryguard.ai.ui.vet.VetDashboardScreen
+import androidx.compose.material.icons.filled.HeartBroken
+import androidx.compose.ui.Alignment
+import com.poultryguard.ai.ui.mortality.MortalityScreen
+import com.poultryguard.ai.ui.mortality.MortalityViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(applicationContext) }
+            LaunchedEffect(Unit) {
+                vetRepository.populateInitialVetsIfNeeded()
+            }
+            
             var currentLanguage by remember { mutableStateOf(AppLanguage.ENGLISH) }
 
             CompositionLocalProvider(LocalAppLanguage provides currentLanguage) {
@@ -59,7 +70,7 @@ class MainActivity : ComponentActivity() {
                             is AuthUiState.Loading -> {
                                 Box(
                                     modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = androidx.compose.ui.Alignment.Center
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     CircularProgressIndicator(
                                         color = MaterialTheme.colorScheme.primary,
@@ -72,14 +83,17 @@ class MainActivity : ComponentActivity() {
                                 when (userProfile.role) {
                                     UserRole.FARMER -> {
                                         FarmerNavigationContainer(
+                                            userProfile = userProfile,
                                             currentLanguage = currentLanguage,
                                             onLanguageChanged = { currentLanguage = it },
-                                            onLogout = { authViewModel.logout() }
+                                            onLogout = { authViewModel.logout() },
+                                            vetRepository = vetRepository
                                         )
                                     }
                                     UserRole.VETERINARIAN -> {
                                         VetDashboardScreen(
-                                            onLogout = { authViewModel.logout() }
+                                            onLogout = { authViewModel.logout() },
+                                            vetRepository = vetRepository
                                         )
                                     }
                                     UserRole.ADMIN -> {
@@ -147,9 +161,11 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun FarmerNavigationContainer(
+        userProfile: UserProfile,
         currentLanguage: AppLanguage,
         onLanguageChanged: (AppLanguage) -> Unit,
-        onLogout: () -> Unit
+        onLogout: () -> Unit,
+        vetRepository: com.poultryguard.ai.data.repository.VetRepository
     ) {
         val navController = rememberNavController()
         val dashboardViewModel: DashboardViewModel = viewModel()
@@ -178,6 +194,21 @@ class MainActivity : ComponentActivity() {
                         label = { Text(stringResource("dashboard")) }
                     )
                     NavigationBarItem(
+                        selected = currentTab == "mortality",
+                        onClick = {
+                            currentTab = "mortality"
+                            navController.navigate("mortality") {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.HeartBroken, contentDescription = "Mortality") },
+                        label = { Text(stringResource("mortality")) }
+                    )
+                    NavigationBarItem(
                         selected = currentTab == "controls",
                         onClick = {
                             currentTab = "controls"
@@ -204,7 +235,7 @@ class MainActivity : ComponentActivity() {
                                 restoreState = true
                             }
                         },
-                        icon = { Icon(Icons.Default.Notifications, contentDescription = "Alerts") },
+                        icon = { Icon(Icons.Default.Visibility, contentDescription = "Guardian") },
                         label = { Text(stringResource("alerts")) }
                     )
                     NavigationBarItem(
@@ -233,6 +264,7 @@ class MainActivity : ComponentActivity() {
                 composable("dashboard") {
                     DashboardScreen(
                         viewModel = dashboardViewModel,
+                        farmerName = userProfile.name,
                         onSensorClick = { sensor ->
                             Toast.makeText(
                                 this@MainActivity,
@@ -241,7 +273,23 @@ class MainActivity : ComponentActivity() {
                             ).show()
                         },
                         currentLanguage = currentLanguage,
-                        onLanguageChanged = onLanguageChanged
+                        onLanguageChanged = onLanguageChanged,
+                        onNavigateToMortality = {
+                            currentTab = "mortality"
+                            navController.navigate("mortality") {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    )
+                }
+                composable("mortality") {
+                    val mortalityViewModel: MortalityViewModel = viewModel()
+                    MortalityScreen(
+                        viewModel = mortalityViewModel
                     )
                 }
                 composable("controls") {
@@ -252,7 +300,9 @@ class MainActivity : ComponentActivity() {
                 }
                 composable("profile") {
                     ProfileScreen(
-                        onLogout = onLogout
+                        userProfile = userProfile,
+                        onLogout = onLogout,
+                        vetRepository = vetRepository
                     )
                 }
             }

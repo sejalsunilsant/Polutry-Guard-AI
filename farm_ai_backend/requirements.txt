@@ -1,0 +1,13 @@
+flask
+flask-cors
+xgboost
+scikit-learn
+numpy
+pandas
+openpyxl
+librosa
+onnxruntime
+supabase
+qdrant-client
+fastembed
+requests
