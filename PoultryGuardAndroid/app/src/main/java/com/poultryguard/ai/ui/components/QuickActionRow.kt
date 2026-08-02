@@ -24,7 +24,7 @@ import com.poultryguard.ai.ui.theme.*
 fun QuickActionRow(modifier: Modifier = Modifier) {
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
-            text = "Environmental Controls",
+            text = "Device Conditions",
             style = Typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = TextDark,

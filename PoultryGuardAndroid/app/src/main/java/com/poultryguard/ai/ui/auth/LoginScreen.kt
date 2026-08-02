@@ -26,6 +26,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.poultryguard.ai.R
 import com.poultryguard.ai.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -61,20 +64,13 @@ fun LoginScreen(
                 verticalArrangement = Arrangement.Center
             ) {
                 // Brand Header Logo/Avatar
-                Box(
+                Image(
+                    painter = painterResource(id = R.drawable.logo),
+                    contentDescription = "Poultry Guard Logo",
                     modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(GreenPrimary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "PG",
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
+                        .size(120.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 

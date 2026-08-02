@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.google.gson.Gson
 import com.poultryguard.ai.data.model.UserProfile
+import com.poultryguard.ai.data.model.FarmEvent
 
 class LocalCacheManager(context: Context) {
 
@@ -69,5 +70,82 @@ class LocalCacheManager(context: Context) {
 
     fun clearCache() {
         prefs.edit().clear().apply()
+    }
+
+    fun getCachedFarmEvents(): List<FarmEvent> {
+        val json = prefs.getString("cached_farm_events", null)
+        if (json == null) {
+            val mocks = listOf(
+                FarmEvent(
+                    dateStr = "2026-05-25",
+                    timeStr = "09:00",
+                    type = com.poultryguard.ai.data.model.FarmEventType.CLEANING,
+                    title = "Routine Shed Cleaning",
+                    notes = "Litter turned and completely dried. Fans checked."
+                ),
+                FarmEvent(
+                    dateStr = "2026-05-28",
+                    timeStr = "10:30",
+                    type = com.poultryguard.ai.data.model.FarmEventType.VACCINE,
+                    title = "Gumboro Vaccine Administered",
+                    notes = "Applied via drinking water lines."
+                ),
+                FarmEvent(
+                    dateStr = "2026-06-01",
+                    timeStr = "08:00",
+                    type = com.poultryguard.ai.data.model.FarmEventType.VACCINE,
+                    title = "Newcastle LaSota Booster",
+                    notes = "Aerosol spray application in Shed #4."
+                ),
+                FarmEvent(
+                    dateStr = "2026-06-03",
+                    timeStr = "14:00",
+                    type = com.poultryguard.ai.data.model.FarmEventType.FEEDING,
+                    title = "High-Protein Starter Blend",
+                    notes = "Feeding sweep audit completed for Shed #4."
+                ),
+                FarmEvent(
+                    dateStr = "2026-06-05",
+                    timeStr = "11:00",
+                    type = com.poultryguard.ai.data.model.FarmEventType.VENTILATION,
+                    title = "Exhaust Fan Speed Testing",
+                    notes = "Verify fans at 100% max velocity.",
+                    isScheduled = true,
+                    recurrence = com.poultryguard.ai.data.model.RecurrenceType.WEEKLY
+                )
+            )
+            cacheFarmEvents(mocks)
+            return mocks
+        }
+        return try {
+            val type = object : com.google.gson.reflect.TypeToken<List<FarmEvent>>() {}.type
+            gson.fromJson(json, type)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun cacheFarmEvents(events: List<FarmEvent>) {
+        try {
+            val json = gson.toJson(events)
+            prefs.edit().putString("cached_farm_events", json).apply()
+        } catch (e: Exception) {
+            // fallback
+        }
+    }
+
+    fun addFarmEvent(event: FarmEvent) {
+        val current = getCachedFarmEvents().toMutableList()
+        current.add(event)
+        cacheFarmEvents(current)
+    }
+
+    fun getApiBaseUrl(): String {
+        return prefs.getString("api_base_url", "http://10.0.2.2:5000/") ?: "http://10.0.2.2:5000/"
+    }
+
+    fun saveApiBaseUrl(url: String) {
+        val formattedUrl = if (url.endsWith("/")) url else "$url/"
+        prefs.edit().putString("api_base_url", formattedUrl).apply()
     }
 }

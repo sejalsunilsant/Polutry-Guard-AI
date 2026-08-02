@@ -13,3 +13,45 @@
 .externalNativeBuild
 .cxx
 local.properties
+# Built objects and caches
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+.flat
+classes.dex
+# Android Studio internal files
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+
+
+# Generated files
+*.class
+*.dex
+*.flat
+**/build/
+
+.kotlin/
+
+
+
+google-services.json
+
+# --- IDE Settings ---
+.idea/
+
+*.ipr
+*.iws
+.project
+.settings/
+.classpath
+
+# --- OS Specific ---
+Thumbs.db
+desktop.ini
+
+# --- Secrets/Env (If you use them) ---
+.env

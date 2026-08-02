@@ -16,12 +16,12 @@ enum class AppLanguage {
 object Translations {
     private val englishMap = mapOf(
         "app_title" to "Poultry Guard AI",
-        "welcome" to "Hello, Farmer Joe",
+        "welcome_prefix" to "Hello, ",
         "live" to "Live",
         "mqtt_sync" to "Syncing...",
         "dashboard" to "Monitor",
         "controls" to "Controls",
-        "alerts" to "Alerts",
+        "alerts" to "Guardian",
         "profile" to "Profile",
         "temp" to "Temperature",
         "humid" to "Humidity",
@@ -42,17 +42,25 @@ object Translations {
         "sim_deck" to "Telemetry Simulator Deck",
         "immunization" to "Immunization Calendar",
         "active" to "Active",
-        "idle" to "Idle"
+        "idle" to "Idle",
+        "mortality" to "Mortality",
+        "suspected_cause" to "Suspected Cause",
+        "env_snapshot" to "Sensor Snapshot",
+        "other" to "Other",
+        "symptoms_custom" to "Custom Symptoms",
+        "cause_distribution" to "Cause Distribution",
+        "avg_metrics" to "Average Telemetry During Death",
+        "delete" to "Delete"
     )
 
     private val hindiMap = mapOf(
         "app_title" to "पोल्ट्री गार्ड एआई",
-        "welcome" to "नमस्ते, किसान जो",
+        "welcome_prefix" to "नमस्ते, ",
         "live" to "सक्रिय",
         "mqtt_sync" to "सिंक हो रहा है...",
         "dashboard" to "निगरानी",
         "controls" to "नियंत्रण",
-        "alerts" to "अलर्ट",
+        "alerts" to "गार्डियन",
         "profile" to "प्रोफ़ाइल",
         "temp" to "तापमान",
         "humid" to "नमी (आर्द्रता)",
@@ -73,17 +81,25 @@ object Translations {
         "sim_deck" to "टेलीमेट्री सिम्युलेटर डेक",
         "immunization" to "टीकाकरण कैलेंडर",
         "active" to "चालू",
-        "idle" to "निष्क्रिय"
+        "idle" to "निष्क्रिय",
+        "mortality" to "मृत्यु दर",
+        "suspected_cause" to "संदेहास्पद कारण",
+        "env_snapshot" to "सेंसर स्नैपशॉट",
+        "other" to "अन्य",
+        "symptoms_custom" to "कस्टम लक्षण",
+        "cause_distribution" to "मृत्यु कारण वितरण",
+        "avg_metrics" to "मृत्यु के समय औसत सेंसर डेटा",
+        "delete" to "हटाएं"
     )
 
     private val marathiMap = mapOf(
         "app_title" to "पोल्ट्री गार्ड एआय",
-        "welcome" to "नमस्कार, शेतकरी जो",
+        "welcome_prefix" to "नमस्कार, ",
         "live" to "सक्रिय",
         "mqtt_sync" to "सिंक होत आहे...",
         "dashboard" to "निरीक्षण",
         "controls" to "नियंत्रण",
-        "alerts" to "अलर्ट",
+        "alerts" to "गार्डियन",
         "profile" to "प्रोफाईल",
         "temp" to "तापमान",
         "humid" to "दमटपणा (आर्द्रता)",
@@ -104,7 +120,15 @@ object Translations {
         "sim_deck" to "टेलीमेट्री सिम्युलेटर डेक",
         "immunization" to "लसीकरण वेळापत्रक",
         "active" to "सुरू",
-        "idle" to "बंद"
+        "idle" to "बंद",
+        "mortality" to "मृत्यू दर",
+        "suspected_cause" to "संशयित कारण",
+        "env_snapshot" to "सेन्सर स्नॅपशॉट",
+        "other" to "इतर",
+        "symptoms_custom" to "कस्टम लक्षणे",
+        "cause_distribution" to "मृत्यू कारण वितरण",
+        "avg_metrics" to "मृत्यूच्या वेळची सरासरी सेन्सर आकडेवारी",
+        "delete" to "काढून टाका"
     )
 
     fun translate(key: String, lang: AppLanguage): String {

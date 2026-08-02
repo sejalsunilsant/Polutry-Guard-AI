@@ -1,0 +1,28 @@
+# Poultry Disease Identification and Treatment Guide
+
+Identifying and treating diseases early prevents high mortality rates in broilers.
+
+Common Broiler Diseases:
+
+1. Infectious Bronchitis (IB)
+- Description: A highly contagious viral respiratory disease that affects chickens of all ages.
+- Symptoms: Sneezing, coughing (snick), gasping for air, nasal discharge, wet eyes, and lethargy.
+- Prevention: Vaccination is the primary defense. Administer the Newcastle-Bronchitis (e.g. LaSota) booster via water lines or aerosol spray.
+- Treatment: No specific antiviral treatment. Support the flock by increasing exhaust fan speeds to lower dust and ammonia, and adding electrolytes/vitamins to drinking water.
+
+2. Coccidiosis
+- Description: A parasitic disease of the intestinal tract caused by microscopic coccidia parasites.
+- Symptoms: Pale combs, bloody droppings, ruffled feathers, huddled birds, decreased feed consumption, and slow weight growth.
+- Prevention: Keep the litter dry. Coccidia thrive in wet, warm environments. Use coccidiostats in feed.
+- Treatment: Add Amprolium to the drinking water lines immediately for 5-7 days. Clean out wet spots in litter.
+
+3. Newcastle Disease (ND)
+- Description: An acute, highly contagious viral disease.
+- Symptoms: Respiratory snicks, gasping, nasal discharge, followed by nervous signs such as twisting of the head and neck (torticollis), greenish watery diarrhea, and rapid mortality.
+- Prevention: Rigorous vaccination program and strict biosecurity.
+- Treatment: No treatment exists. Infected flocks must be quarantined and euthanized if required by local authorities.
+
+4. Sudden Death Syndrome (SDS)
+- Description: Also known as flip-over disease, affecting fast-growing, healthy male broilers.
+- Symptoms: Healthy birds suddenly thrash, flip on their backs, and die.
+- Prevention: Slow down early growth rates by using lighting programs or restricting feed intake slightly during the first two weeks.

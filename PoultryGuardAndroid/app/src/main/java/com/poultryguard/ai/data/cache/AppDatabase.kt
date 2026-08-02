@@ -5,11 +5,13 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.poultryguard.ai.data.model.MortalityRecord
+import com.poultryguard.ai.data.model.Veterinarian
 
-@Database(entities = [MortalityRecord::class], version = 1, exportSchema = false)
+@Database(entities = [MortalityRecord::class, Veterinarian::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun mortalityDao(): MortalityDao
+    abstract fun vetDao(): VetDao
 
     companion object {
         @Volatile

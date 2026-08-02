@@ -1,0 +1,27 @@
+# Ventilation and Temperature Management in Broiler Sheds
+
+Maintaining the ideal climate is crucial for broiler growth, feed conversion ratio (FCR), and disease prevention.
+
+Environmental Telemetry Guidelines:
+
+1. Ideal Temperature Range:
+- Day 1-7 (Brooding): 32°C - 35°C
+- Day 8-14: 28°C - 30°C
+- Day 15-21: 24°C - 27°C (Day 18 target is 24°C)
+- Day 22 onwards: 21°C - 23°C
+- Heat Stress Hazard: Temperatures above 29°C cause broilers to pant. Above 32°C can cause heat stroke and high mortality. Enable cooling misters and run exhaust fans at 100% velocity.
+
+2. Ideal Relative Humidity (RH):
+- Standard Range: 50% to 70%
+- High Humidity Hazard: RH above 75% prevents evaporative cooling (panting) and dampens litter. Run exhaust fans to purge moisture.
+- Low Humidity Hazard: RH below 40% causes dry dust buildup, leading to respiratory snick and dust-borne viral infections.
+
+3. Ammonia (NH3) Gas Levels:
+- Safe Limit: Ammonia should be kept below 20 ppm.
+- Warning Level: 15-20 ppm requires increased ventilation cycle rates.
+- Critical Danger: Ammonia above 25 ppm damages the respiratory tract lining, leading to snick, eye damage, and susceptibility to E. coli and IB viruses. Cycle fans at maximum speed and treat damp litter spots.
+
+4. Acoustic Panic and Disturbance:
+- Normal Level: Steady chirping between 40 dB and 65 dB.
+- Warning Level: 66-74 dB indicates high activity (feeding sweeps or slight alarm).
+- Critical Danger: Noise levels above 75 dB indicate flock panic, stampeding, or predator attack. Smothering can occur. Inspect the shed immediately.
