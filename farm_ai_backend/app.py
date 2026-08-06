@@ -21,13 +21,19 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from routes.prediction_routes import prediction_bp
 from routes.chatbot_routes import chatbot_bp
+from routes.ingestion_routes import ingestion_bp
+from ml.manager import ModelManager
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for local emulator API queries
 
+# Pre-load all machine learning models into memory at application startup
+ModelManager.initialize_all_models()
+
 # Register Blueprints for modular routes
 app.register_blueprint(prediction_bp)
 app.register_blueprint(chatbot_bp)
+app.register_blueprint(ingestion_bp)
 
 @app.route('/health', methods=['GET'])
 def health_check():

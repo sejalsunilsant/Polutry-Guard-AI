@@ -1,6 +1,7 @@
 package com.poultryguard.ai.ui.profile
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -35,6 +36,7 @@ fun ProfileScreen(
     userProfile: UserProfile,
     onLogout: () -> Unit,
     vetRepository: com.poultryguard.ai.data.repository.VetRepository,
+    onNavigateToHardwareConfig: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val veterinariansState = vetRepository.getVeterinariansFlow().collectAsState(initial = emptyList())
@@ -141,7 +143,8 @@ fun ProfileScreen(
                         ProfileSettingRow(
                             icon = Icons.Default.Security,
                             title = "IoT Gateway Cryptographic Keys",
-                            subtitle = "Authorized firmware connection"
+                            subtitle = "Authorized firmware connection",
+                            onClick = onNavigateToHardwareConfig
                         )
                         Divider(color = DividerColor, thickness = 1.dp, modifier = Modifier.padding(vertical = 10.dp))
                         ProfileSettingRow(
@@ -443,10 +446,14 @@ fun ContactItem(
 fun ProfileSettingRow(
     icon: ImageVector,
     title: String,
-    subtitle: String
+    subtitle: String,
+    onClick: () -> Unit = {}
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
