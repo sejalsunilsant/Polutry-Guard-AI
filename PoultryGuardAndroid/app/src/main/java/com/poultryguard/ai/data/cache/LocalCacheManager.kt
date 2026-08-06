@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.google.gson.Gson
 import com.poultryguard.ai.data.model.UserProfile
 import com.poultryguard.ai.data.model.FarmEvent
+import com.poultryguard.ai.data.model.HardwareKit
 
 class LocalCacheManager(context: Context) {
 
@@ -147,5 +148,49 @@ class LocalCacheManager(context: Context) {
     fun saveApiBaseUrl(url: String) {
         val formattedUrl = if (url.endsWith("/")) url else "$url/"
         prefs.edit().putString("api_base_url", formattedUrl).apply()
+    }
+
+    fun getHardwareKits(): List<HardwareKit> {
+        val json = prefs.getString("hardware_kits", null) ?: return emptyList()
+        return try {
+            val type = object : com.google.gson.reflect.TypeToken<List<HardwareKit>>() {}.type
+            gson.fromJson(json, type)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveHardwareKits(kits: List<HardwareKit>) {
+        try {
+            val json = gson.toJson(kits)
+            prefs.edit().putString("hardware_kits", json).apply()
+        } catch (e: Exception) {
+        }
+    }
+
+    fun addHardwareKit(kit: HardwareKit) {
+        val list = getHardwareKits().toMutableList()
+        if (kit.isActive) {
+            for (i in list.indices) {
+                list[i] = list[i].copy(isActive = false)
+            }
+        }
+        list.removeAll { it.gatewayId == kit.gatewayId }
+        list.add(kit)
+        saveHardwareKits(list)
+    }
+
+    fun deleteHardwareKit(gatewayId: String) {
+        val list = getHardwareKits().toMutableList()
+        list.removeAll { it.gatewayId == gatewayId }
+        saveHardwareKits(list)
+    }
+
+    fun setActiveGatewayId(gatewayId: String) {
+        val list = getHardwareKits().toMutableList()
+        for (i in list.indices) {
+            list[i] = list[i].copy(isActive = list[i].gatewayId == gatewayId)
+        }
+        saveHardwareKits(list)
     }
 }

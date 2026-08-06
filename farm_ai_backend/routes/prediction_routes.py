@@ -2,7 +2,8 @@ import os
 import tempfile
 from flask import Blueprint, request, jsonify
 from ml.predictor import predict_disease
-from ml.audio.yamnet import predict_sound
+from ml.manager import ModelManager
+from ml.audio.preprocessing import extract_spectrogram
 
 prediction_bp = Blueprint("prediction_bp", __name__)
 
@@ -103,7 +104,17 @@ def predict_sound_endpoint():
                 file.save(temp_path)
 
             # Perform prediction
-            result = predict_sound(temp_path)
+            log_mel = extract_spectrogram(temp_path)
+            if log_mel is None:
+                result = {
+                    "prediction": "None",
+                    "confidence": 0.0,
+                    "probabilities": {"Healthy": 0.0, "Sick": 0.0, "None": 1.0},
+                    "status": "error",
+                    "message": "Failed to extract spectrogram from audio file."
+                }
+            else:
+                result = ModelManager.predict_sound(log_mel)
 
             # Cleanup
             try:

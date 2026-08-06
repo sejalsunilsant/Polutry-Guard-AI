@@ -36,6 +36,7 @@ import com.poultryguard.ai.ui.controls.ControlsScreen
 import com.poultryguard.ai.ui.dashboard.DashboardScreen
 import com.poultryguard.ai.ui.dashboard.DashboardViewModel
 import com.poultryguard.ai.ui.profile.ProfileScreen
+import com.poultryguard.ai.ui.profile.HardwareConfigScreen
 import com.poultryguard.ai.ui.theme.AppLanguage
 import com.poultryguard.ai.ui.theme.LocalAppLanguage
 import com.poultryguard.ai.ui.theme.PoultryGuardTheme
@@ -302,7 +303,18 @@ class MainActivity : ComponentActivity() {
                     ProfileScreen(
                         userProfile = userProfile,
                         onLogout = onLogout,
-                        vetRepository = vetRepository
+                        vetRepository = vetRepository,
+                        onNavigateToHardwareConfig = {
+                            navController.navigate("hardware_config")
+                        }
+                    )
+                }
+                composable("hardware_config") {
+                    HardwareConfigScreen(
+                        userProfile = userProfile,
+                        onNavigateBack = {
+                            navController.popBackStack()
+                        }
                     )
                 }
             }
