@@ -67,6 +67,8 @@ fun MortalityScreen(
             .maxByOrNull { it.value.sumOf { r -> r.deathCount } }?.key ?: "None"
     } else "None"
 
+    val uiError by viewModel.uiError.collectAsState()
+
     // Clear form on successful submission
     LaunchedEffect(submissionSuccess) {
         if (submissionSuccess) {
@@ -77,6 +79,13 @@ fun MortalityScreen(
             selectedCause = causesList[0]
             customCause = ""
             viewModel.resetSubmissionStatus()
+        }
+    }
+
+    LaunchedEffect(uiError) {
+        uiError?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.clearError()
         }
     }
 

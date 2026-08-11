@@ -167,42 +167,30 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         if (deathCount <= 0) return
         
         viewModelScope.launch {
-            val currentBatch = activeBatch
+            val currentBatch = activeBatch ?: return@launch
+            if (deathCount > currentBatch.currentCount) return@launch
             
-            // Create a complete MortalityRecord with environmental snapshot
-            val record = MortalityRecord(
-                id = java.util.UUID.randomUUID().toString(),
+            val result = batchRepository.recordMortality(
+                batchId = currentBatch.id,
                 deathCount = deathCount,
-                symptoms = if (symptoms.isEmpty()) "Unspecified" else symptoms.joinToString(", "),
-                suspectedCause = "Sudden Death Syndrome", // Default suspect from quick dashboard log
-                timestamp = System.currentTimeMillis(),
-                temperature = currentTemp,
-                humidity = currentHumid,
-                ammoniaLevel = currentAmmonia,
-                soundLevel = currentSound,
-                batchId = currentBatch?.id,
-                isSynced = false
+                reason = "Sudden Death Syndrome",
+                notes = if (symptoms.isEmpty()) "Unspecified" else symptoms.joinToString(", "),
+                recordedBy = "Farmer"
             )
-            mortalityRepository.insertRecord(record)
             
-            // Trigger sync
-            batchRepository.syncUnsyncedMortalities()
-            
-            // Reload batch state
-            val batchResult = batchRepository.getActiveBatch("default_farm")
-            batchResult.onSuccess { batch ->
-                activeBatch = batch
-                unsyncedMortalities = batch?.let { batchRepository.getUnsyncedMortalityCount(it.id) } ?: 0
+            result.onSuccess { updated ->
+                activeBatch = updated
+                unsyncedMortalities = batchRepository.getUnsyncedMortalityCount(updated.id)
+                
+                if (symptoms.isNotEmpty() && symptoms.contains("Respiratory Snick")) {
+                    currentPrediction = DiseasePredictionResponse(
+                        riskLevel = DiseaseRiskLevel.HIGH,
+                        confidence = 0.90f,
+                        recommendation = "HIGH DISEASE RISK: Active coughing (Snick) symptoms logged alongside telemetry. Cycle fans to ventilate."
+                    )
+                }
+                updateDashboardState()
             }
-            
-            if (symptoms.isNotEmpty() && symptoms.contains("Respiratory Snick")) {
-                currentPrediction = DiseasePredictionResponse(
-                    riskLevel = DiseaseRiskLevel.HIGH,
-                    confidence = 0.90f,
-                    recommendation = "HIGH DISEASE RISK: Active coughing (Snick) symptoms logged alongside telemetry. Cycle fans to ventilate."
-                )
-            }
-            updateDashboardState()
         }
     }
 

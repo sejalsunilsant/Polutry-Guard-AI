@@ -32,6 +32,7 @@ import com.poultryguard.ai.data.cache.LocalCacheManager
 import com.poultryguard.ai.data.model.HardwareKit
 import com.poultryguard.ai.data.model.SystemStats
 import com.poultryguard.ai.ui.theme.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import kotlinx.coroutines.launch
 
 data class IoTNode(
@@ -58,6 +59,90 @@ fun AdminDashboardScreen(
         coroutineScope.launch {
             val current = systemStatsState.value ?: com.poultryguard.ai.data.model.SystemStats()
             statsDao.insertOrUpdate(updateBlock(current))
+        }
+    }
+
+    val farmerDao = remember { db.farmerProfileDao() }
+    val farmersListState by farmerDao.getAllFarmersFlow().collectAsState(initial = emptyList())
+    var selectedFarmer by remember { mutableStateOf<com.poultryguard.ai.data.model.FarmerProfile?>(null) }
+
+    var farmerSearchQuery by remember { mutableStateOf("") }
+    var farmerStatusFilter by remember { mutableStateOf("All") }
+    var farmerLocationFilter by remember { mutableStateOf("All") }
+
+    fun toggleFarmerAccountStatus(farmerId: String, currentStatus: String) {
+        coroutineScope.launch {
+            val newStatus = if (currentStatus == "Active") "Disabled" else "Active"
+            farmerDao.updateAccountStatus(farmerId, newStatus)
+            Toast.makeText(context, "Account status updated to $newStatus", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun resetFarmerAccess(farmerId: String) {
+        coroutineScope.launch {
+            farmerDao.resetAccess(farmerId)
+            Toast.makeText(context, "Account password and access tokens reset successfully!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(context) }
+    val vetsListState by vetRepository.getVeterinariansFlow().collectAsState(initial = emptyList())
+    var selectedVet by remember { mutableStateOf<com.poultryguard.ai.data.model.Veterinarian?>(null) }
+    var showAddVetDialog by remember { mutableStateOf(false) }
+
+    var vetSearchQuery by remember { mutableStateOf("") }
+    var vetVerificationFilter by remember { mutableStateOf("All") }
+
+    fun approveVetRegistration(vetId: String) {
+        coroutineScope.launch {
+            vetRepository.updateVerificationStatus(vetId, "VERIFIED")
+            Toast.makeText(context, "Veterinarian credentials verified and registration approved!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun rejectVetRegistration(vetId: String) {
+        coroutineScope.launch {
+            vetRepository.updateVerificationStatus(vetId, "REJECTED")
+            Toast.makeText(context, "Veterinarian credentials rejected.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun suspendVetAccount(vetId: String) {
+        coroutineScope.launch {
+            vetRepository.updateVerificationStatus(vetId, "SUSPENDED")
+            Toast.makeText(context, "Veterinarian account suspended.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun activateVetAccount(vetId: String) {
+        coroutineScope.launch {
+            vetRepository.updateVerificationStatus(vetId, "VERIFIED")
+            Toast.makeText(context, "Veterinarian account activated.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun changeVetAvailability(vetId: String, status: String) {
+        coroutineScope.launch {
+            vetRepository.updateAvailability(vetId, status)
+            Toast.makeText(context, "Veterinarian availability updated to $status.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    var peopleSubTab by remember { mutableStateOf(0) }
+
+    val ticketDao = remember { db.supportTicketDao() }
+    val ticketsListState by ticketDao.getAllTicketsFlow().collectAsState(initial = emptyList())
+    var selectedTicket by remember { mutableStateOf<com.poultryguard.ai.data.model.SupportTicket?>(null) }
+    
+    var supportSearchQuery by remember { mutableStateOf("") }
+    var supportCategoryFilter by remember { mutableStateOf("All") }
+    var supportPriorityFilter by remember { mutableStateOf("All") }
+
+    fun toggleTicketStatus(ticketId: String, currentStatus: String) {
+        coroutineScope.launch {
+            val newStatus = if (currentStatus == "Resolved") "Unresolved" else "Resolved"
+            ticketDao.updateStatus(ticketId, newStatus)
+            Toast.makeText(context, "Ticket status updated to $newStatus", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -124,6 +209,7 @@ fun AdminDashboardScreen(
     var selectedTab by remember { mutableStateOf(0) }
 
     // Dialog state variables
+    var showAddFarmerDialog by remember { mutableStateOf(false) }
     var showAddKitDialog by remember { mutableStateOf(false) }
     var activeAssignKit by remember { mutableStateOf<HardwareKit?>(null) }
     var activeFirmwareKit by remember { mutableStateOf<HardwareKit?>(null) }
@@ -143,7 +229,7 @@ fun AdminDashboardScreen(
         modifier = modifier.fillMaxSize(),
         containerColor = AppBackground,
         floatingActionButton = {
-            if (selectedTab == 2) {
+            if (selectedTab == 3) {
                 FloatingActionButton(
                     onClick = { showAddKitDialog = true },
                     containerColor = GreenPrimary,
@@ -152,6 +238,61 @@ fun AdminDashboardScreen(
                 ) {
                     Icon(imageVector = Icons.Default.Add, contentDescription = "Add New Kit")
                 }
+            } else if (selectedTab == 1 && peopleSubTab == 0) {
+                FloatingActionButton(
+                    onClick = { showAddFarmerDialog = true },
+                    containerColor = GreenPrimary,
+                    contentColor = Color.White,
+                    shape = CircleShape
+                ) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = "Add New Farmer")
+                }
+            } else if (selectedTab == 1 && peopleSubTab == 1) {
+                FloatingActionButton(
+                    onClick = { showAddVetDialog = true },
+                    containerColor = GreenPrimary,
+                    contentColor = Color.White,
+                    shape = CircleShape
+                ) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = "Add New Veterinarian")
+                }
+            }
+        },
+        bottomBar = {
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp
+            ) {
+                NavigationBarItem(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    icon = { Icon(Icons.Default.GridView, contentDescription = "Dashboard") },
+                    label = { Text("Dashboard") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    icon = { Icon(Icons.Default.People, contentDescription = "People") },
+                    label = { Text("People") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    icon = { Icon(Icons.Default.HeartBroken, contentDescription = "Health") },
+                    label = { Text("Health") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    icon = { Icon(Icons.Default.Router, contentDescription = "Kits") },
+                    label = { Text("Kits") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
+                    icon = { Icon(Icons.Default.Feedback, contentDescription = "Support") },
+                    label = { Text("Support") }
+                )
             }
         }
     ) { innerPadding ->
@@ -206,36 +347,755 @@ fun AdminDashboardScreen(
                 }
             }
 
-            // Tabs Layout (Health vs Kits)
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = Color.Transparent,
-                contentColor = GreenPrimary,
-                indicator = { tabPositions ->
-                    TabRowDefaults.Indicator(
-                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                        color = GreenPrimary
-                    )
-                },
-                modifier = Modifier.padding(horizontal = 16.dp)
-            ) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = { Text("Health & Approvals", fontWeight = FontWeight.Bold) }
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    text = { Text("Device Kit Management", fontWeight = FontWeight.Bold) }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
             // Renders selected tab screen
             when (selectedTab) {
                 0 -> {
+                    // System Dashboard tab
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp)
+                    ) {
+                        item {
+                            val stats = systemStatsState.value ?: com.poultryguard.ai.data.model.SystemStats()
+                            
+                            // Visual replica card of user's box layout
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = CardSurface),
+                                border = BorderStroke(1.dp, DividerColor)
+                            ) {
+                                Column {
+                                    // Header of replica
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(GreenPrimary)
+                                            .padding(vertical = 12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "POULTRY GUARD ADMIN OVERVIEW",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            style = Typography.labelMedium,
+                                            letterSpacing = 1.5.sp
+                                        )
+                                    }
+                                    
+                                    // Row 1
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)
+                                    ) {
+                                        // Cell 1: Farmers
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(12.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = "${stats.totalFarmers}",
+                                                style = Typography.displayLarge,
+                                                fontSize = 24.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = TextDark
+                                            )
+                                            Text(
+                                                text = "Farmers",
+                                                style = Typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = TextMedium
+                                            )
+                                        }
+                                        
+                                        Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+                                        
+                                        // Cell 2: Active Farmers
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(12.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = "${stats.activeFarmers}",
+                                                style = Typography.displayLarge,
+                                                fontSize = 24.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = GreenPrimary
+                                            )
+                                            Text(
+                                                text = "Active",
+                                                style = Typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = TextMedium
+                                            )
+                                        }
+                                        
+                                        Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+                                        
+                                        // Cell 3: Total Devices
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(12.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = "${stats.totalDevices}",
+                                                style = Typography.displayLarge,
+                                                fontSize = 24.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = TextDark
+                                            )
+                                            Text(
+                                                text = "Devices",
+                                                style = Typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = TextMedium
+                                            )
+                                        }
+                                    }
+                                    
+                                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(DividerColor))
+                                    
+                                    // Row 2
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)
+                                    ) {
+                                        // Cell 1: Online Devices
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(12.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = "${stats.onlineDevices}",
+                                                style = Typography.displayLarge,
+                                                fontSize = 24.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Color(0xFF2E7D32)
+                                            )
+                                            Text(
+                                                text = "Online",
+                                                style = Typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = TextMedium
+                                            )
+                                        }
+                                        
+                                        Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+                                        
+                                        // Cell 2: Offline Devices
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(12.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = "${stats.offlineDevices}",
+                                                style = Typography.displayLarge,
+                                                fontSize = 24.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = AlertRed
+                                            )
+                                            Text(
+                                                text = "Offline",
+                                                style = Typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = TextMedium
+                                            )
+                                        }
+                                        
+                                        Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+                                        
+                                        // Cell 3: Disease Alerts
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(12.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = "${stats.openDiseaseAlerts}",
+                                                style = Typography.displayLarge,
+                                                fontSize = 24.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = AlertOrange
+                                            )
+                                            Text(
+                                                text = "Alerts",
+                                                style = Typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = TextMedium
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Category Details Cards
+                        item {
+                            val stats = systemStatsState.value ?: com.poultryguard.ai.data.model.SystemStats()
+                            
+                            // Farmer & Farm Card
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = CardSurface)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Agriculture, contentDescription = "Farms", tint = GreenPrimary, modifier = Modifier.size(24.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Farmer & Farm Infrastructure", style = Typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Column {
+                                            Text("Farmers Registry", style = Typography.labelMedium)
+                                            Text("Total: ${stats.totalFarmers}  |  Active: ${stats.activeFarmers}", style = Typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            IconButton(
+                                                onClick = {
+                                                    updateStats { it.copy(totalFarmers = it.totalFarmers + 1, activeFarmers = it.activeFarmers + 1) }
+                                                },
+                                                modifier = Modifier.size(32.dp).background(GreenLight, RoundedCornerShape(6.dp))
+                                            ) {
+                                                Icon(Icons.Default.Add, contentDescription = "Add Farmer", tint = GreenPrimary, modifier = Modifier.size(16.dp))
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    updateStats {
+                                                        it.copy(
+                                                            totalFarmers = (it.totalFarmers - 1).coerceAtLeast(0),
+                                                            activeFarmers = (it.activeFarmers - 1).coerceAtLeast(0)
+                                                        )
+                                                    }
+                                                },
+                                                modifier = Modifier.size(32.dp).background(AppBackground, RoundedCornerShape(6.dp))
+                                            ) {
+                                                Icon(Icons.Default.Remove, contentDescription = "Remove Farmer", tint = TextMedium, modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                    }
+                                    Divider(color = DividerColor, thickness = 1.dp, modifier = Modifier.padding(vertical = 12.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Column {
+                                            Text("Poultry Farms", style = Typography.labelMedium)
+                                            Text("Total: ${stats.totalFarms}  |  Active: ${stats.activeFarms}", style = Typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            IconButton(
+                                                onClick = {
+                                                    updateStats { it.copy(totalFarms = it.totalFarms + 1, activeFarms = it.activeFarms + 1) }
+                                                },
+                                                modifier = Modifier.size(32.dp).background(GreenLight, RoundedCornerShape(6.dp))
+                                            ) {
+                                                Icon(Icons.Default.Add, contentDescription = "Add Farm", tint = GreenPrimary, modifier = Modifier.size(16.dp))
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    updateStats {
+                                                        it.copy(
+                                                            totalFarms = (it.totalFarms - 1).coerceAtLeast(0),
+                                                            activeFarms = (it.activeFarms - 1).coerceAtLeast(0)
+                                                        )
+                                                    }
+                                                },
+                                                modifier = Modifier.size(32.dp).background(AppBackground, RoundedCornerShape(6.dp))
+                                            ) {
+                                                Icon(Icons.Default.Remove, contentDescription = "Remove Farm", tint = TextMedium, modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        item {
+                            val stats = systemStatsState.value ?: com.poultryguard.ai.data.model.SystemStats()
+                            
+                            // Veterinarian Card
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = CardSurface)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.MedicalServices, contentDescription = "Vets", tint = BlueSecondary, modifier = Modifier.size(24.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Veterinarian Network", style = Typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Column {
+                                            Text("Registered Veterinarians", style = Typography.labelMedium)
+                                            Text("Total Vets: ${stats.registeredVets}  |  Active: ${stats.activeVets}", style = Typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            IconButton(
+                                                onClick = {
+                                                    updateStats { it.copy(registeredVets = it.registeredVets + 1, activeVets = it.activeVets + 1) }
+                                                },
+                                                modifier = Modifier.size(32.dp).background(GreenLight, RoundedCornerShape(6.dp))
+                                            ) {
+                                                Icon(Icons.Default.Add, contentDescription = "Add Vet", tint = GreenPrimary, modifier = Modifier.size(16.dp))
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    updateStats {
+                                                        it.copy(
+                                                            registeredVets = (it.registeredVets - 1).coerceAtLeast(0),
+                                                            activeVets = (it.activeVets - 1).coerceAtLeast(0)
+                                                        )
+                                                    }
+                                                },
+                                                modifier = Modifier.size(32.dp).background(AppBackground, RoundedCornerShape(6.dp))
+                                            ) {
+                                                Icon(Icons.Default.Remove, contentDescription = "Remove Vet", tint = TextMedium, modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        item {
+                            val stats = systemStatsState.value ?: com.poultryguard.ai.data.model.SystemStats()
+                            
+                            // Security & Support Card
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = CardSurface)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Warning, contentDescription = "Alerts", tint = AlertRed, modifier = Modifier.size(24.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Security & Support Center", style = Typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Column {
+                                            Text("Open Disease Alerts", style = Typography.labelMedium)
+                                            Text("${stats.openDiseaseAlerts} Active Incidents", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = if (stats.openDiseaseAlerts > 0) AlertRed else TextDark)
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            IconButton(
+                                                onClick = {
+                                                    updateStats { it.copy(openDiseaseAlerts = it.openDiseaseAlerts + 1) }
+                                                },
+                                                modifier = Modifier.size(32.dp).background(AlertRed.copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+                                            ) {
+                                                Icon(Icons.Default.Add, contentDescription = "Trigger Alert", tint = AlertRed, modifier = Modifier.size(16.dp))
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    updateStats { it.copy(openDiseaseAlerts = (it.openDiseaseAlerts - 1).coerceAtLeast(0)) }
+                                                },
+                                                modifier = Modifier.size(32.dp).background(AppBackground, RoundedCornerShape(6.dp))
+                                            ) {
+                                                Icon(Icons.Default.Remove, contentDescription = "Resolve Alert", tint = TextMedium, modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                    }
+                                    Divider(color = DividerColor, thickness = 1.dp, modifier = Modifier.padding(vertical = 12.dp))
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Column {
+                                            Text("Pending Support Requests", style = Typography.labelMedium)
+                                            Text("${stats.pendingSupportRequests} Open Tickets", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = if (stats.pendingSupportRequests > 0) AlertOrange else TextDark)
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            IconButton(
+                                                onClick = {
+                                                    updateStats { it.copy(pendingSupportRequests = it.pendingSupportRequests + 1) }
+                                                },
+                                                modifier = Modifier.size(32.dp).background(AlertOrange.copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+                                            ) {
+                                                Icon(Icons.Default.Add, contentDescription = "Open Ticket", tint = AlertOrange, modifier = Modifier.size(16.dp))
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    updateStats { it.copy(pendingSupportRequests = (it.pendingSupportRequests - 1).coerceAtLeast(0)) }
+                                                },
+                                                modifier = Modifier.size(32.dp).background(AppBackground, RoundedCornerShape(6.dp))
+                                            ) {
+                                                Icon(Icons.Default.Remove, contentDescription = "Resolve Ticket", tint = TextMedium, modifier = Modifier.size(16.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                1 -> {
+                    // People Tab (Farmers & Veterinarians Directories combined)
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        TabRow(
+                            selectedTabIndex = peopleSubTab,
+                            containerColor = Color.Transparent,
+                            contentColor = GreenPrimary,
+                            indicator = { tabPositions ->
+                                TabRowDefaults.Indicator(
+                                    Modifier.tabIndicatorOffset(tabPositions[peopleSubTab]),
+                                    color = GreenPrimary
+                                )
+                            },
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        ) {
+                            Tab(
+                                selected = peopleSubTab == 0,
+                                onClick = { peopleSubTab = 0 },
+                                text = { Text("Farmers", fontWeight = FontWeight.Bold) }
+                            )
+                            Tab(
+                                selected = peopleSubTab == 1,
+                                onClick = { peopleSubTab = 1 },
+                                text = { Text("Veterinarians", fontWeight = FontWeight.Bold) }
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        when (peopleSubTab) {
+                            0 -> {
+                                // Farmer Directory Sub-Screen
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 16.dp)
+                                ) {
+                                    // Search and status filters row
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        OutlinedTextField(
+                                            value = farmerSearchQuery,
+                                            onValueChange = { farmerSearchQuery = it },
+                                            placeholder = { Text("Search farmer or farm...") },
+                                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedBorderColor = GreenPrimary,
+                                                focusedLabelColor = GreenPrimary
+                                            )
+                                        )
+                                        
+                                        // Status filter toggle ("All" vs "Active")
+                                        var showStatusMenu by remember { mutableStateOf(false) }
+                                        Box {
+                                            OutlinedButton(
+                                                onClick = { showStatusMenu = true },
+                                                shape = RoundedCornerShape(12.dp),
+                                                border = BorderStroke(1.dp, if (farmerStatusFilter != "All") GreenPrimary else DividerColor),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    contentColor = if (farmerStatusFilter != "All") GreenPrimary else TextMedium
+                                                )
+                                            ) {
+                                                Icon(Icons.Default.FilterList, contentDescription = "Status Filter")
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(farmerStatusFilter)
+                                            }
+                                            DropdownMenu(
+                                                expanded = showStatusMenu,
+                                                onDismissRequest = { showStatusMenu = false }
+                                            ) {
+                                                val statusOpts = listOf("All", "Active", "Disabled")
+                                                statusOpts.forEach { opt ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(opt) },
+                                                        onClick = {
+                                                            farmerStatusFilter = opt
+                                                            showStatusMenu = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        
+                                        // Location filter dropdown
+                                        var showLocationMenu by remember { mutableStateOf(false) }
+                                        Box {
+                                            OutlinedButton(
+                                                onClick = { showLocationMenu = true },
+                                                shape = RoundedCornerShape(12.dp),
+                                                border = BorderStroke(1.dp, if (farmerLocationFilter != "All") GreenPrimary else DividerColor),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    contentColor = if (farmerLocationFilter != "All") GreenPrimary else TextMedium
+                                                )
+                                            ) {
+                                                Icon(Icons.Default.Place, contentDescription = "Location Filter")
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(if (farmerLocationFilter.length > 8) farmerLocationFilter.take(8) + "..." else farmerLocationFilter)
+                                            }
+                                            DropdownMenu(
+                                                expanded = showLocationMenu,
+                                                onDismissRequest = { showLocationMenu = false }
+                                            ) {
+                                                val locs = listOf("All", "North Sector", "East Valley Barns", "South Hills", "West Plains")
+                                                locs.forEach { loc ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(loc) },
+                                                        onClick = {
+                                                            farmerLocationFilter = loc
+                                                            showLocationMenu = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    
+                                    // Table Header
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(GreenPrimary.copy(alpha = 0.08f), RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Farmer", modifier = Modifier.weight(1.2f), fontWeight = FontWeight.Bold, color = TextDark, fontSize = 11.sp)
+                                        Text("Farm", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, color = TextDark, fontSize = 11.sp)
+                                        Text("Device", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, color = TextDark, fontSize = 11.sp)
+                                        Text("Status", modifier = Modifier.weight(0.8f), fontWeight = FontWeight.Bold, color = TextDark, fontSize = 11.sp)
+                                        Text("Last Active", modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, color = TextDark, fontSize = 11.sp)
+                                    }
+                                    
+                                    // Farmer list computation
+                                    val filteredFarmers = farmersListState.filter { f ->
+                                        val matchesSearch = f.name.contains(farmerSearchQuery, ignoreCase = true) ||
+                                                f.farmName.contains(farmerSearchQuery, ignoreCase = true)
+                                        val matchesStatus = when (farmerStatusFilter) {
+                                            "Active" -> f.accountStatus == "Active" && f.isOnline
+                                            "Disabled" -> f.accountStatus == "Disabled"
+                                            else -> true
+                                        }
+                                        val matchesLocation = farmerLocationFilter == "All" || f.farmLocation.contains(farmerLocationFilter, ignoreCase = true)
+                                        matchesSearch && matchesStatus && matchesLocation
+                                    }
+                                    
+                                    if (filteredFarmers.isEmpty()) {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth().weight(1f),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("No farmers match search/filter criteria.", color = TextMedium, textAlign = TextAlign.Center)
+                                        }
+                                    } else {
+                                        LazyColumn(
+                                            modifier = Modifier.fillMaxWidth().weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                                            contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
+                                        ) {
+                                            items(filteredFarmers) { farmer ->
+                                                Card(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable { selectedFarmer = farmer },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = CardDefaults.cardColors(containerColor = CardSurface),
+                                                    border = BorderStroke(1.dp, DividerColor)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Text(farmer.name, modifier = Modifier.weight(1.2f), fontWeight = FontWeight.Bold, color = TextDark, fontSize = 12.sp)
+                                                        Text(farmer.farmName, modifier = Modifier.weight(1f), color = TextMedium, fontSize = 12.sp)
+                                                        Text(farmer.deviceId, modifier = Modifier.weight(1f), color = TextMedium, fontSize = 12.sp)
+                                                        
+                                                        // Status Badge
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .weight(0.8f)
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(if (farmer.isOnline) Color(0xFFE8F5E9) else Color(0xFFFFEBEE))
+                                                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Text(
+                                                                text = if (farmer.isOnline) "Online" else "Offline",
+                                                                color = if (farmer.isOnline) Color(0xFF2E7D32) else AlertRed,
+                                                                fontWeight = FontWeight.Bold,
+                                                                fontSize = 10.sp
+                                                            )
+                                                        }
+                                                        
+                                                        Text(farmer.lastActive, modifier = Modifier.weight(1f), color = TextMedium, fontSize = 11.sp)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            1 -> {
+                                // Veterinarian Directory Sub-Screen
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 16.dp)
+                                ) {
+                                    // Search bar & status filters
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        OutlinedTextField(
+                                            value = vetSearchQuery,
+                                            onValueChange = { vetSearchQuery = it },
+                                            placeholder = { Text("Search vet by name, specialty, location...") },
+                                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search Vets") },
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedBorderColor = GreenPrimary,
+                                                focusedLabelColor = GreenPrimary
+                                            )
+                                        )
+                                        
+                                        // Verification filter dropdown
+                                        var showVerificationFilterMenu by remember { mutableStateOf(false) }
+                                        Box {
+                                            OutlinedButton(
+                                                onClick = { showVerificationFilterMenu = true },
+                                                shape = RoundedCornerShape(12.dp),
+                                                border = BorderStroke(1.dp, if (vetVerificationFilter != "All") GreenPrimary else DividerColor),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    contentColor = if (vetVerificationFilter != "All") GreenPrimary else TextMedium
+                                                )
+                                            ) {
+                                                Icon(Icons.Default.FilterList, contentDescription = "Filter Verification")
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(vetVerificationFilter)
+                                            }
+                                            DropdownMenu(
+                                                expanded = showVerificationFilterMenu,
+                                                onDismissRequest = { showVerificationFilterMenu = false }
+                                            ) {
+                                                val statusOpts = listOf("All", "PENDING", "VERIFIED", "REJECTED", "SUSPENDED")
+                                                statusOpts.forEach { opt ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(opt) },
+                                                        onClick = {
+                                                            vetVerificationFilter = opt
+                                                            showVerificationFilterMenu = false
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    
+                                    // List display
+                                    val filteredVets = vetsListState.filter { v ->
+                                        val matchesSearch = v.name.contains(vetSearchQuery, ignoreCase = true) ||
+                                                v.specialty.contains(vetSearchQuery, ignoreCase = true) ||
+                                                v.location.contains(vetSearchQuery, ignoreCase = true)
+                                        val matchesStatus = vetVerificationFilter == "All" || v.verificationStatus == vetVerificationFilter
+                                        matchesSearch && matchesStatus
+                                    }
+                                    
+                                    if (filteredVets.isEmpty()) {
+                                        Box(
+                                            modifier = Modifier.fillMaxWidth().weight(1f),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text("No veterinarians match search/filter criteria.", color = TextMedium, textAlign = TextAlign.Center)
+                                        }
+                                    } else {
+                                        LazyColumn(
+                                            modifier = Modifier.fillMaxWidth().weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                                            contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)
+                                        ) {
+                                            items(filteredVets) { vet ->
+                                                Card(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable { selectedVet = vet },
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    colors = CardDefaults.cardColors(containerColor = CardSurface),
+                                                    border = BorderStroke(1.dp, DividerColor)
+                                                ) {
+                                                    Column(modifier = Modifier.padding(14.dp)) {
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Column(modifier = Modifier.weight(1f)) {
+                                                                Text(vet.name, style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = TextDark)
+                                                                Text(vet.specialty, style = Typography.bodyMedium, color = TextMedium)
+                                                            }
+                                                            
+                                                            // Verification status badge
+                                                            val statusColor = when (vet.verificationStatus) {
+                                                                "VERIFIED" -> Color(0xFF2E7D32)
+                                                                "PENDING" -> AlertOrange
+                                                                "REJECTED" -> AlertRed
+                                                                "SUSPENDED" -> Color.Gray
+                                                                else -> TextMedium
+                                                            }
+                                                            val statusBg = when (vet.verificationStatus) {
+                                                                "VERIFIED" -> Color(0xFFE8F5E9)
+                                                                "PENDING" -> Color(0xFFFFF3E0)
+                                                                "REJECTED" -> Color(0xFFFFEBEE)
+                                                                "SUSPENDED" -> Color(0xFFECEFF1)
+                                                                else -> DividerColor
+                                                            }
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .clip(RoundedCornerShape(6.dp))
+                                                                    .background(statusBg)
+                                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Text(vet.verificationStatus, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                                            }
+                                                        }
+                                                        
+                                                        Spacer(modifier = Modifier.height(8.dp))
+                                                        
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                                        ) {
+                                                            Text("Location: ${vet.location}", style = Typography.bodySmall, color = TextMedium)
+                                                            Text("Availability: ${vet.availability}", style = Typography.bodySmall, color = if (vet.availability == "Available") GreenPrimary else TextMedium)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                2 -> {
                     // IoT Node Health and approvals list
                     LazyColumn(
                         modifier = Modifier
@@ -275,12 +1135,12 @@ fun AdminDashboardScreen(
                                     Column(modifier = Modifier.padding(16.dp)) {
                                         Text(text = "Server Sync Latency", style = Typography.labelMedium, color = TextMedium)
                                         Text(
-                                            text = "45 ms",
+                                            text = "24 ms",
                                             style = Typography.headlineMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = TextDark
                                         )
-                                        Text(text = "Live Broker connection", style = Typography.labelMedium, color = GreenPrimary)
+                                        Text(text = "Reporting Normal", style = Typography.labelMedium, color = GreenPrimary, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -289,7 +1149,7 @@ fun AdminDashboardScreen(
                         // Pending Approvals Widget
                         item {
                             Text(
-                                text = "Pending Staff Approvals",
+                                text = "Pending Staff Registrations",
                                 style = Typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = TextDark
@@ -329,35 +1189,26 @@ fun AdminDashboardScreen(
                             )
                         }
 
-                        items(nodes.size) { index ->
-                            val node = nodes[index]
+                        items(nodes) { node ->
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(12.dp),
                                 colors = CardDefaults.cardColors(containerColor = CardSurface)
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Box(
                                             modifier = Modifier
-                                                .size(36.dp)
+                                                .size(12.dp)
                                                 .clip(CircleShape)
-                                                .background(GreenLight),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Router,
-                                                contentDescription = "IoT Node",
-                                                tint = GreenPrimary,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
+                                                .background(if (node.status == "ONLINE") GreenPrimary else AlertRed)
+                                        )
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Column {
                                             Text(
@@ -384,7 +1235,7 @@ fun AdminDashboardScreen(
                         }
                     }
                 }
-                1 -> {
+                3 -> {
                     // Device Kit Management screen
                     Column(
                         modifier = Modifier
@@ -400,8 +1251,8 @@ fun AdminDashboardScreen(
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
-                                placeholder = { Text("Search by Kit / Device ID...") },
-                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                                placeholder = { Text("Search ESP32 hardware kits...") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search Kits") },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(12.dp),
@@ -411,32 +1262,31 @@ fun AdminDashboardScreen(
                                 )
                             )
 
-                            // Simple lifecycle filter dropdown menu trigger
-                            var showFilterMenu by remember { mutableStateOf(false) }
+                            var showStatusDropdown by remember { mutableStateOf(false) }
                             Box {
                                 OutlinedButton(
-                                    onClick = { showFilterMenu = true },
+                                    onClick = { showStatusDropdown = true },
                                     shape = RoundedCornerShape(12.dp),
                                     border = BorderStroke(1.dp, if (statusFilter != "All") GreenPrimary else DividerColor),
                                     colors = ButtonDefaults.outlinedButtonColors(
                                         contentColor = if (statusFilter != "All") GreenPrimary else TextMedium
                                     )
                                 ) {
-                                    Icon(Icons.Default.FilterList, contentDescription = "Filter")
+                                    Icon(Icons.Default.FilterAlt, contentDescription = "Filter Status")
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(statusFilter)
                                 }
                                 DropdownMenu(
-                                    expanded = showFilterMenu,
-                                    onDismissRequest = { showFilterMenu = false }
+                                    expanded = showStatusDropdown,
+                                    onDismissRequest = { showStatusDropdown = false }
                                 ) {
-                                    val filters = listOf("All", "Manufactured", "Available", "Assigned to Farmer", "Installed", "Active", "Maintenance", "Retired")
-                                    filters.forEach { filterOpt ->
+                                    val states = listOf("All", "Available", "Active", "Maintenance", "Retired")
+                                    states.forEach { s ->
                                         DropdownMenuItem(
-                                            text = { Text(filterOpt) },
+                                            text = { Text(s) },
                                             onClick = {
-                                                statusFilter = filterOpt
-                                                showFilterMenu = false
+                                                statusFilter = s
+                                                showStatusDropdown = false
                                             }
                                         )
                                     }
@@ -446,54 +1296,49 @@ fun AdminDashboardScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Filter and search computation
-                        val filteredKits = kitsList.filter { kit ->
+                        // Kits list
+                        val filteredList = kitsList.filter { kit ->
                             val matchesSearch = kit.kitId.contains(searchQuery, ignoreCase = true) ||
-                                    kit.gatewayId.contains(searchQuery, ignoreCase = true) ||
-                                    kit.serialNumber.contains(searchQuery, ignoreCase = true)
-                            val matchesFilter = statusFilter == "All" || kit.lifecycleStatus == statusFilter
-                            matchesSearch && matchesFilter
+                                    kit.farmerName.contains(searchQuery, ignoreCase = true) ||
+                                    kit.farmName.contains(searchQuery, ignoreCase = true)
+                            val matchesStatus = statusFilter == "All" || kit.lifecycleStatus == statusFilter
+                            matchesSearch && matchesStatus
                         }
 
-                        if (filteredKits.isEmpty()) {
+                        if (filteredList.isEmpty()) {
                             Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
+                                modifier = Modifier.fillMaxWidth().weight(1f),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = "No device kits registered matching criteria.",
-                                    color = TextMedium,
-                                    textAlign = TextAlign.Center
-                                )
+                                Text("No hardware kits found in database.", color = TextMedium, textAlign = TextAlign.Center)
                             }
                         } else {
                             LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
+                                modifier = Modifier.fillMaxWidth().weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                                contentPadding = PaddingValues(bottom = 80.dp)
+                                contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)
                             ) {
-                                items(filteredKits) { kit ->
+                                items(filteredList) { kit ->
                                     AdminHardwareKitCard(
                                         kit = kit,
                                         onAssignClick = { activeAssignKit = kit },
                                         onUnassignClick = {
-                                            // Unassign action
                                             val updatedList = kitsList.map { k ->
                                                 if (k.kitId == kit.kitId) {
-                                                    k.copy(
-                                                        lifecycleStatus = "Available",
-                                                        farmerName = "",
-                                                        farmName = ""
-                                                    )
+                                                    k.copy(farmerName = "", farmName = "", lifecycleStatus = "Available")
                                                 } else k
                                             }
                                             kitsList = updatedList
                                             cacheManager.saveHardwareKits(updatedList)
-                                            Toast.makeText(context, "Kit ${kit.kitId} unassigned from farmer.", Toast.LENGTH_SHORT).show()
+                                            updateStats {
+                                                it.copy(
+                                                    activeFarmers = (it.activeFarmers - 1).coerceAtLeast(0),
+                                                    activeFarms = (it.activeFarms - 1).coerceAtLeast(0),
+                                                    onlineDevices = (it.onlineDevices - 1).coerceAtLeast(0),
+                                                    offlineDevices = it.offlineDevices + 1
+                                                )
+                                            }
+                                            Toast.makeText(context, "Kit ${kit.kitId} unassigned.", Toast.LENGTH_SHORT).show()
                                         },
                                         onMaintenanceClick = {
                                             val updatedList = kitsList.map { k ->
@@ -503,7 +1348,7 @@ fun AdminDashboardScreen(
                                             }
                                             kitsList = updatedList
                                             cacheManager.saveHardwareKits(updatedList)
-                                            Toast.makeText(context, "Kit ${kit.kitId} marked in Maintenance status.", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Kit ${kit.kitId} set to Maintenance.", Toast.LENGTH_SHORT).show()
                                         },
                                         onRetireClick = {
                                             val updatedList = kitsList.map { k ->
@@ -513,7 +1358,7 @@ fun AdminDashboardScreen(
                                             }
                                             kitsList = updatedList
                                             cacheManager.saveHardwareKits(updatedList)
-                                            Toast.makeText(context, "Kit ${kit.kitId} retired successfully.", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, "Kit ${kit.kitId} retired.", Toast.LENGTH_SHORT).show()
                                         },
                                         onFirmwareClick = { activeFirmwareKit = kit },
                                         onReplaceClick = { activeReplaceKit = kit }
@@ -523,20 +1368,189 @@ fun AdminDashboardScreen(
                         }
                     }
                 }
+                4 -> {
+                    // Support & Complaints tab
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        // Filters row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = supportSearchQuery,
+                                onValueChange = { supportSearchQuery = it },
+                                placeholder = { Text("Search complaints & requests...") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search Tickets") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = GreenPrimary,
+                                    focusedLabelColor = GreenPrimary
+                                )
+                            )
+                            
+                            // Category filter dropdown
+                            var showCatFilterMenu by remember { mutableStateOf(false) }
+                            Box {
+                                OutlinedButton(
+                                    onClick = { showCatFilterMenu = true },
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, if (supportCategoryFilter != "All") GreenPrimary else DividerColor),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = if (supportCategoryFilter != "All") GreenPrimary else TextMedium
+                                    )
+                                ) {
+                                    Icon(Icons.Default.FilterList, contentDescription = "Filter Category")
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(if (supportCategoryFilter.length > 8) supportCategoryFilter.take(8) + "..." else supportCategoryFilter)
+                                }
+                                DropdownMenu(
+                                    expanded = showCatFilterMenu,
+                                    onDismissRequest = { showCatFilterMenu = false }
+                                ) {
+                                    val catOpts = listOf("All", "Farmer Complaint", "Device Problem", "Installation Request", "Veterinarian Request", "Technical Support")
+                                    catOpts.forEach { opt ->
+                                        DropdownMenuItem(
+                                            text = { Text(opt) },
+                                            onClick = {
+                                                supportCategoryFilter = opt
+                                                showCatFilterMenu = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        // List computation
+                        val filteredTickets = ticketsListState.filter { t ->
+                            val matchesSearch = t.farmerName.contains(supportSearchQuery, ignoreCase = true) ||
+                                    t.issue.contains(supportSearchQuery, ignoreCase = true) ||
+                                    t.ticketId.contains(supportSearchQuery, ignoreCase = true)
+                            val matchesCategory = supportCategoryFilter == "All" || t.category == supportCategoryFilter
+                            matchesSearch && matchesCategory
+                        }
+                        
+                        if (filteredTickets.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("No support tickets found.", color = TextMedium, textAlign = TextAlign.Center)
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)
+                            ) {
+                                items(filteredTickets) { ticket ->
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { selectedTicket = ticket },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = CardDefaults.cardColors(containerColor = CardSurface),
+                                        border = BorderStroke(1.dp, DividerColor)
+                                    ) {
+                                        Column(modifier = Modifier.padding(14.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text("Ticket #${ticket.ticketId}", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = TextDark)
+                                                    Text("Farmer: ${ticket.farmerName}", style = Typography.bodyMedium, color = TextMedium)
+                                                }
+                                                
+                                                // Priority & Status Badge
+                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    val priorityColor = when (ticket.priority) {
+                                                        "HIGH" -> AlertRed
+                                                        "MEDIUM" -> AlertOrange
+                                                        else -> Color(0xFF2979FF)
+                                                    }
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(priorityColor.copy(alpha = 0.1f))
+                                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                    ) {
+                                                        Text(ticket.priority, color = priorityColor, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                                                    }
+                                                    
+                                                    val statusColor = if (ticket.status == "Resolved") Color(0xFF2E7D32) else AlertOrange
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(statusColor.copy(alpha = 0.1f))
+                                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                    ) {
+                                                        Text(ticket.status, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                                                    }
+                                                }
+                                            }
+                                            
+                                            Spacer(modifier = Modifier.height(10.dp))
+                                            
+                                            Text("Category: ${ticket.category}", style = Typography.bodySmall, color = TextMedium, fontWeight = FontWeight.Bold)
+                                            Text("Issue: ${ticket.issue}", style = Typography.bodyMedium, color = TextDark)
+                                            if (ticket.deviceId != "N/A" && ticket.deviceId.isNotEmpty()) {
+                                                Text("Device: ${ticket.deviceId}", style = Typography.bodySmall, color = TextMedium)
+                                            }
+                                            
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.End
+                                            ) {
+                                                Button(
+                                                    onClick = { toggleTicketStatus(ticket.ticketId, ticket.status) },
+                                                    colors = ButtonDefaults.buttonColors(
+                                                        containerColor = if (ticket.status == "Resolved") AlertOrange else GreenPrimary
+                                                    ),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                    modifier = Modifier.height(30.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (ticket.status == "Resolved") "Mark Unresolved" else "Resolve",
+                                                        fontSize = 11.sp,
+                                                        color = Color.White
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
             }
         }
+    }
 
-        // Add Kit Dialog Layout
         if (showAddKitDialog) {
             AddKitDialog(
                 onDismiss = { showAddKitDialog = false },
                 onAddKit = { newKit ->
-                    val updated = kitsList.toMutableList().apply { add(newKit) }
-                    kitsList = updated
-                    cacheManager.saveHardwareKits(updated)
-                    showAddKitDialog = false
-                    Toast.makeText(context, "Successfully registered Device Kit ${newKit.kitId}!", Toast.LENGTH_SHORT).show()
-                },
+                                    val updated = kitsList.toMutableList().apply { add(newKit) }
+                                    kitsList = updated
+                                    cacheManager.saveHardwareKits(updated)
+                                    updateStats { it.copy(totalDevices = it.totalDevices + 1, offlineDevices = it.offlineDevices + 1) }
+                                    showAddKitDialog = false
+                                    Toast.makeText(context, "Successfully registered Device Kit ${newKit.kitId}!", Toast.LENGTH_SHORT).show()
+                                },
                 nextSuggestedId = "PG-KIT-000${kitsList.size + 46}"
             )
         }
@@ -558,6 +1572,14 @@ fun AdminDashboardScreen(
                     }
                     kitsList = updatedList
                     cacheManager.saveHardwareKits(updatedList)
+                    updateStats {
+                        it.copy(
+                            activeFarmers = it.activeFarmers + 1,
+                            activeFarms = it.activeFarms + 1,
+                            onlineDevices = it.onlineDevices + 1,
+                            offlineDevices = (it.offlineDevices - 1).coerceAtLeast(0)
+                        )
+                    }
                     activeAssignKit = null
                     Toast.makeText(context, "Kit ${kit.kitId} assigned to $farmer at $farm.", Toast.LENGTH_SHORT).show()
                 }
@@ -603,6 +1625,57 @@ fun AdminDashboardScreen(
                     activeReplaceKit = null
                     Toast.makeText(context, "Kit ${kit.kitId} hardware replaced with ESP32 node $newDeviceId.", Toast.LENGTH_SHORT).show()
                 }
+            )
+        }
+
+        // Add Farmer Dialog Layout
+        if (showAddFarmerDialog) {
+            AddFarmerDialog(
+                onDismiss = { showAddFarmerDialog = false },
+                onAddFarmer = { newFarmer ->
+                    coroutineScope.launch {
+                        farmerDao.insert(newFarmer)
+                        showAddFarmerDialog = false
+                        Toast.makeText(context, "Successfully registered Farmer ${newFarmer.name}!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+        }
+
+        // Farmer Details Dialog Layout
+        selectedFarmer?.let { farmer ->
+            FarmerDetailDialog(
+                farmer = farmer,
+                onDismiss = { selectedFarmer = null },
+                onToggleStatus = { toggleFarmerAccountStatus(farmer.id, farmer.accountStatus) },
+                onResetAccess = { resetFarmerAccess(farmer.id) }
+            )
+        }
+
+        // Add Vet Dialog Layout
+        if (showAddVetDialog) {
+            AddVetDialog(
+                onDismiss = { showAddVetDialog = false },
+                onAddVet = { newVet ->
+                    coroutineScope.launch {
+                        vetRepository.insert(newVet)
+                        showAddVetDialog = false
+                        Toast.makeText(context, "Successfully registered Veterinarian ${newVet.name}!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+        }
+
+        // Vet Details Dialog Layout
+        selectedVet?.let { vet ->
+            VetDetailDialog(
+                vet = vet,
+                onDismiss = { selectedVet = null },
+                onApprove = { approveVetRegistration(vet.id) },
+                onReject = { rejectVetRegistration(vet.id) },
+                onSuspend = { suspendVetAccount(vet.id) },
+                onActivate = { activateVetAccount(vet.id) },
+                onChangeAvailability = { availability -> changeVetAvailability(vet.id, availability) }
             )
         }
     }
@@ -1249,4 +2322,573 @@ fun getStatusColor(status: String): Color {
         "Retired" -> AlertRed
         else -> TextMedium
     }
+}
+
+@Composable
+fun StaffApprovalRow(
+    name: String,
+    requestRole: String,
+    email: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                style = Typography.bodyLarge,
+                fontWeight = FontWeight.Bold,
+                color = TextDark
+            )
+            Text(
+                text = "$requestRole • $email",
+                style = Typography.labelMedium,
+                color = TextMedium
+            )
+        }
+        
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(
+                onClick = { /* Approve action */ },
+                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text("Approve", fontSize = 11.sp, color = Color.White)
+            }
+            OutlinedButton(
+                onClick = { /* Deny action */ },
+                border = BorderStroke(1.dp, AlertRed),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = AlertRed),
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text("Deny", fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FarmerDetailDialog(
+    farmer: com.poultryguard.ai.data.model.FarmerProfile,
+    onDismiss: () -> Unit,
+    onToggleStatus: () -> Unit,
+    onResetAccess: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Person, contentDescription = "Farmer Detail", tint = GreenPrimary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = farmer.name,
+                    fontWeight = FontWeight.Bold,
+                    color = TextDark
+                )
+            }
+        },
+        text = {
+            val scrollState = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Section 1: Personal Information
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("1. Personal Information", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("Email Address", farmer.email)
+                    DetailRow("Phone Number", farmer.phone)
+                    DetailRow("Account Status", farmer.accountStatus)
+                    DetailRow("Connection State", if (farmer.isOnline) "Online" else "Offline")
+                    DetailRow("Last Seen Active", farmer.lastActive)
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 2: Farm Information
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("2. Farm Information", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("Farm/Facility Name", farmer.farmName)
+                    DetailRow("Geographic Location", farmer.farmLocation)
+                    DetailRow("Total Active Sheds", "${farmer.totalSheds} Barns")
+                    DetailRow("Total Floor Space", "${farmer.floorSpaceSqFt} Sq. Ft.")
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 3: Active Batch
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("3. Active Batch Info", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("Batch Identifier", farmer.activeBatchId)
+                    DetailRow("Placement Date", farmer.activeBatchStartDate)
+                    DetailRow("Chick Age", "${farmer.chickAgeDays} Days")
+                    DetailRow("Cumulative Feed", "${farmer.feedConsumedKg} Kg")
+                    DetailRow("Mortality Registered", "${farmer.mortalitiesCount} Birds")
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 4: Connected Devices
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("4. Connected Devices", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("IoT Gateway Node ID", farmer.deviceId)
+                    DetailRow("PCB Serial No.", farmer.deviceSerial)
+                    DetailRow("Firmware Version", farmer.firmwareVersion)
+                    DetailRow("Signal Strength", farmer.signalStrengthRssi)
+                    DetailRow("Node Battery level", farmer.batteryPercentage)
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 5: Sensor Status
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("5. Sensor Status", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("Temp Sensor", farmer.tempSensorStatus)
+                    DetailRow("Humidity Sensor", farmer.humidSensorStatus)
+                    DetailRow("Ammonia Gas (NH3)", farmer.ammoniaSensorStatus)
+                    DetailRow("Sound Monitor", farmer.soundSensorStatus)
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 6: Disease Alerts
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("6. Disease Alerts", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("Open Alerts", "${farmer.openDiseaseAlertsCount} Open Alerts")
+                    DetailRow("Latest Warning", farmer.latestAlertText)
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 7: Veterinarian Consultations
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("7. Veterinarian Consultations", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("Consulting Vet", farmer.assignedVetName)
+                    DetailRow("Last Session Date", farmer.lastConsultationDate)
+                    DetailRow("Clinical Findings", farmer.consultationNotes)
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 8: Activity History
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("8. Activity History Logs", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("Last User Login", farmer.lastLoginTime)
+                    DetailRow("Last Admin/Shed Action", farmer.lastActionDesc)
+                }
+            }
+        },
+        confirmButton = {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (farmer.accountStatus == "Active") AlertRed else Color(0xFF2E7D32)
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = {
+                        onToggleStatus()
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = if (farmer.accountStatus == "Active") "Disable Acc" else "Activate Acc",
+                        color = Color.White,
+                        fontSize = 11.sp
+                    )
+                }
+                
+                OutlinedButton(
+                    shape = RoundedCornerShape(8.dp),
+                    onClick = {
+                        onResetAccess()
+                        onDismiss()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Reset Access", fontSize = 11.sp)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.padding(end = 8.dp)
+            ) {
+                Text("Close")
+            }
+        },
+        containerColor = CardSurface
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddFarmerDialog(
+    onDismiss: () -> Unit,
+    onAddFarmer: (com.poultryguard.ai.data.model.FarmerProfile) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var farmName by remember { mutableStateOf("") }
+    var location by remember { mutableStateOf("") }
+    var sheds by remember { mutableStateOf("4") }
+    var size by remember { mutableStateOf("24000") }
+    var deviceId by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.AddCircle, contentDescription = "Add Farmer", tint = GreenPrimary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Register Farmer Account", fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            val scrollState = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 350.dp)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("Email Address") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = phone, onValueChange = { phone = it }, label = { Text("Phone Number") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = farmName, onValueChange = { farmName = it }, label = { Text("Farm Name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Farm Location") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = sheds, onValueChange = { sheds = it }, label = { Text("Total Sheds / Barns") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = size, onValueChange = { size = it }, label = { Text("Floor Space (Sq. Ft.)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = deviceId, onValueChange = { deviceId = it }, label = { Text("Associated Device ID (Optional)") }, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            Button(
+                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                onClick = {
+                    if (name.isBlank() || email.isBlank() || farmName.isBlank()) return@Button
+                    val farmer = com.poultryguard.ai.data.model.FarmerProfile(
+                        id = "farmer_" + System.currentTimeMillis(),
+                        name = name,
+                        email = email,
+                        phone = phone,
+                        accountStatus = "Active",
+                        lastActive = "Just now",
+                        isOnline = false,
+                        farmName = farmName,
+                        farmLocation = location.ifBlank { "Unspecified Sector" },
+                        totalSheds = sheds.toIntOrNull() ?: 4,
+                        floorSpaceSqFt = size.toIntOrNull() ?: 24000,
+                        deviceId = deviceId.ifBlank { "Unassigned" },
+                        deviceSerial = "PGESP" + (1000..9999).random(),
+                        firmwareVersion = "1.2.0",
+                        activeBatchId = "BATCH-2026-" + (10..99).random() + "A",
+                        activeBatchStartDate = "2026-08-11",
+                        chickAgeDays = 1,
+                        feedConsumedKg = 10.0f,
+                        mortalitiesCount = 0,
+                        openDiseaseAlertsCount = 0
+                    )
+                    onAddFarmer(farmer)
+                }
+            ) {
+                Text("Register Farmer", color = Color.White)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        containerColor = CardSurface
+    )
+}
+
+@Composable
+fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, style = Typography.labelMedium, color = TextMedium)
+        Text(text = value, style = Typography.bodyMedium, color = TextDark, fontWeight = FontWeight.Bold, textAlign = TextAlign.End)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddVetDialog(
+    onDismiss: () -> Unit,
+    onAddVet: (com.poultryguard.ai.data.model.Veterinarian) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var specialty by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var location by remember { mutableStateOf("") }
+    var licenseNumber by remember { mutableStateOf("") }
+    var qualification by remember { mutableStateOf("") }
+    var experience by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.AddCircle, contentDescription = "Add Vet", tint = GreenPrimary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Register Veterinarian", fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            val scrollState = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 350.dp)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = specialty, onValueChange = { specialty = it }, label = { Text("Specialization (Specialty)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("Email Address") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = phone, onValueChange = { phone = it }, label = { Text("Phone Number") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Location") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = licenseNumber, onValueChange = { licenseNumber = it }, label = { Text("License Number") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = qualification, onValueChange = { qualification = it }, label = { Text("Qualification") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = experience, onValueChange = { experience = it }, label = { Text("Experience (e.g. 5 years)") }, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            Button(
+                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                onClick = {
+                    if (name.isBlank() || specialty.isBlank() || email.isBlank()) return@Button
+                    val vet = com.poultryguard.ai.data.model.Veterinarian(
+                        id = "vet_" + System.currentTimeMillis(),
+                        name = name,
+                        specialty = specialty,
+                        phone = phone,
+                        email = email,
+                        location = location,
+                        photoUrl = "default_avatar",
+                        availability = "Available",
+                        verificationStatus = "PENDING",
+                        assignedFarmsCount = 0,
+                        openCasesCount = 0,
+                        credentialsDetails = "License: $licenseNumber, Qualification: $qualification, Experience: $experience",
+                        consultationHistory = "No consultation history recorded yet.",
+                        licenseNumber = licenseNumber,
+                        qualification = qualification,
+                        experience = experience
+                    )
+                    onAddVet(vet)
+                }
+            ) {
+                Text("Register Vet", color = Color.White)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        containerColor = CardSurface
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VetDetailDialog(
+    vet: com.poultryguard.ai.data.model.Veterinarian,
+    onDismiss: () -> Unit,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+    onSuspend: () -> Unit,
+    onActivate: () -> Unit,
+    onChangeAvailability: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Person, contentDescription = "Vet Detail", tint = GreenPrimary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(vet.name, fontWeight = FontWeight.Bold, color = TextDark)
+            }
+        },
+        text = {
+            val scrollState = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(scrollState),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Section 1: Demographics
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("1. Demographics & Contact", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("Specialty", vet.specialty)
+                    DetailRow("Location", vet.location)
+                    DetailRow("Phone", vet.phone)
+                    DetailRow("Email", vet.email)
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 2: Case & Farm Metrics
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("2. Farms & Active Cases", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("Assigned Farms", "${vet.assignedFarmsCount} Farms")
+                    DetailRow("Open Active Cases", "${vet.openCasesCount} Cases")
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 3: Status Details
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("3. Verification & Availability Status", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("Verification Status", vet.verificationStatus)
+                    DetailRow("Availability State", vet.availability)
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 4: Credentials Details
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("4. Verified Credentials & Experience", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    DetailRow("License Number", vet.licenseNumber.ifBlank { "Unspecified" })
+                    DetailRow("Qualification", vet.qualification.ifBlank { "Unspecified" })
+                    DetailRow("Experience", vet.experience.ifBlank { "Unspecified" })
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(vet.credentialsDetails, style = Typography.bodyMedium, color = TextDark)
+                }
+                
+                Divider(color = DividerColor)
+                
+                // Section 5: Consultation History
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("5. Consultation & Case History", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                    Text(vet.consultationHistory, style = Typography.bodyMedium, color = TextDark)
+                }
+            }
+        },
+        confirmButton = {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Verification management actions
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (vet.verificationStatus == "PENDING") {
+                        Button(
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            shape = RoundedCornerShape(8.dp),
+                            onClick = {
+                                onApprove()
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Verify & Approve", color = Color.White, fontSize = 11.sp)
+                        }
+                        OutlinedButton(
+                            border = BorderStroke(1.dp, AlertRed),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AlertRed),
+                            shape = RoundedCornerShape(8.dp),
+                            onClick = {
+                                onReject()
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Reject", fontSize = 11.sp)
+                        }
+                    } else if (vet.verificationStatus == "VERIFIED") {
+                        Button(
+                            colors = ButtonDefaults.buttonColors(containerColor = AlertRed),
+                            shape = RoundedCornerShape(8.dp),
+                            onClick = {
+                                onSuspend()
+                                onDismiss()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Deactivate / Suspend Account", color = Color.White, fontSize = 11.sp)
+                        }
+                    } else if (vet.verificationStatus == "SUSPENDED" || vet.verificationStatus == "REJECTED") {
+                        Button(
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                            shape = RoundedCornerShape(8.dp),
+                            onClick = {
+                                onActivate()
+                                onDismiss()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Activate Account", color = Color.White, fontSize = 11.sp)
+                        }
+                    }
+                }
+                
+                // Availability update row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Set Availability: ", style = Typography.labelMedium, color = TextMedium, modifier = Modifier.weight(1f))
+                    val avails = listOf("Available", "Busy", "Unavailable")
+                    avails.forEach { a ->
+                        OutlinedButton(
+                            onClick = { onChangeAvailability(a); onDismiss() },
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, if (vet.availability == a) GreenPrimary else DividerColor),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = if (vet.availability == a) GreenPrimary else TextMedium
+                            ),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text(a, fontSize = 9.sp)
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.padding(end = 8.dp)
+            ) {
+                Text("Close")
+            }
+        },
+        containerColor = CardSurface
+    )
 }

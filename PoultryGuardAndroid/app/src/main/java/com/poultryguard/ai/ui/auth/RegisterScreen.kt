@@ -134,6 +134,7 @@ fun RegisterScreen(
                                     UserRole.FARMER -> "Farmer (Monitor & Toggles)"
                                     UserRole.VETERINARIAN -> "Veterinarian (Acoustic Logs & Health)"
                                     UserRole.ADMIN -> "Admin (Configure Systems & Sheds)"
+                                    UserRole.SUPER_ADMIN -> "Super Admin (Full System Control)"
                                 },
                                 onValueChange = {},
                                 readOnly = true,
@@ -171,6 +172,13 @@ fun RegisterScreen(
                                     text = { Text("Admin (System Superintendent)") },
                                     onClick = {
                                         selectedRole = UserRole.ADMIN
+                                        dropdownExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Super Admin (Full System Control)") },
+                                    onClick = {
+                                        selectedRole = UserRole.SUPER_ADMIN
                                         dropdownExpanded = false
                                     }
                                 )

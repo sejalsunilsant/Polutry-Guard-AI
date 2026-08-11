@@ -171,6 +171,64 @@ class BatchRepository(private val context: Context) {
         mortalityDao.getUnsyncedMortalityCountForBatch(batchId) ?: 0
     }
 
+    suspend fun recordMortality(
+        batchId: String,
+        deathCount: Int,
+        reason: String,
+        notes: String?,
+        recordedBy: String
+    ): Result<Batch> = withContext(Dispatchers.IO) {
+        try {
+            val cachedBatch = cacheManager.getCachedActiveBatch()
+            if (cachedBatch == null || cachedBatch.id != batchId) {
+                throw Exception("Active batch not found in local cache.")
+            }
+            if (deathCount > cachedBatch.currentCount) {
+                throw Exception("Mortality count ($deathCount) cannot exceed current batch count (${cachedBatch.currentCount}).")
+            }
+
+            val record = com.poultryguard.ai.data.model.MortalityRecord(
+                id = UUID.randomUUID().toString(),
+                deathCount = deathCount,
+                reason = reason,
+                notes = notes,
+                timestamp = System.currentTimeMillis(),
+                recordedBy = recordedBy,
+                symptoms = notes ?: "Unspecified",
+                suspectedCause = reason,
+                batchId = batchId,
+                isSynced = false
+            )
+
+            val api = getApi()
+            if (api != null) {
+                val response = api.recordMortality(
+                    batchId = batchId,
+                    body = RecordMortalityRequest(deathCount = deathCount)
+                )
+                if (response.status == "success" && response.data != null) {
+                    val updatedBatch = response.data
+                    cacheManager.cacheActiveBatch(updatedBatch)
+                    val syncedRecord = record.copy(isSynced = true)
+                    mortalityDao.insert(syncedRecord)
+                    return@withContext Result.success(updatedBatch)
+                } else {
+                    throw Exception(response.message ?: "Server rejected mortality event.")
+                }
+            } else {
+                val updatedBatch = cachedBatch.copy(
+                    currentCount = cachedBatch.currentCount - deathCount
+                )
+                cacheManager.cacheActiveBatch(updatedBatch)
+                mortalityDao.insert(record)
+                return@withContext Result.success(updatedBatch)
+            }
+        } catch (e: Exception) {
+            Log.e("BatchRepository", "Failed to record batch mortality: ${e.localizedMessage}")
+            Result.failure(e)
+        }
+    }
+
     /**
      * Outbox Sync Engine: synchronizes local offline mortality events to the server.
      */
@@ -194,6 +252,7 @@ class BatchRepository(private val context: Context) {
                         if (response.status == "success") {
                             mortalityDao.markAsSynced(record.id)
                             successCount++
+                            response.data?.let { cacheManager.cacheActiveBatch(it) }
                             Log.d("BatchRepository", "Successfully synced mortality record: ${record.id}")
                         }
                     } catch (e: Exception) {

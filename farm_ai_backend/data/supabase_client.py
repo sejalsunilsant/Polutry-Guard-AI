@@ -24,6 +24,7 @@ url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 
 supabase: Client = None
+_mock_batches = {}
 
 if url and key and url != "your_supabase_url" and key != "your_supabase_anon_key":
     try:
@@ -263,8 +264,18 @@ def create_batch(batch_id, farm_id, start_date, initial_count, breed="Broiler", 
     Register a new poultry batch for a farm.
     """
     if supabase is None:
+        batch = {
+            "id": batch_id,
+            "farm_id": farm_id,
+            "start_date": start_date,
+            "initial_count": int(initial_count),
+            "current_count": int(initial_count),
+            "breed": breed,
+            "status": status
+        }
+        _mock_batches[batch_id] = batch
         print(f"[Supabase Fallback] Batch '{batch_id}' created locally.")
-        return {"status": "fallback", "data": [{"id": batch_id, "farm_id": farm_id, "status": status}]}
+        return {"status": "success", "data": [batch]}
     try:
         data = {
             "id": batch_id,
@@ -287,7 +298,21 @@ def get_active_batch(farm_id):
     Fetch the currently active batch (using the v_batches view so we get calculated age_days).
     """
     if supabase is None:
-        return None
+        for b in _mock_batches.values():
+            if b.get("farm_id") == farm_id and b.get("status") == "ACTIVE":
+                return b
+        # Fallback initializer
+        default_batch = {
+            "id": "default_batch_id",
+            "farm_id": farm_id,
+            "start_date": "2026-08-01",
+            "initial_count": 5000,
+            "current_count": 5000,
+            "breed": "Broiler",
+            "status": "ACTIVE"
+        }
+        _mock_batches["default_batch_id"] = default_batch
+        return default_batch
     try:
         res = supabase.table("v_batches")\
             .select("*")\
@@ -349,8 +374,17 @@ def record_mortality(batch_id, death_count):
     Safely decrement the current bird count of a batch due to mortality.
     """
     if supabase is None:
-        print(f"[Supabase Fallback] Deceremented count by {death_count} locally.")
-        return {"status": "fallback"}
+        batch = _mock_batches.get(batch_id)
+        if not batch:
+            batch = _mock_batches.get("default_batch_id")
+            if not batch:
+                return {"status": "error", "message": f"Batch '{batch_id}' not found."}
+        current = batch.get("current_count", 0)
+        if int(death_count) > current:
+            return {"status": "error", "message": f"Mortality count {death_count} cannot exceed current batch count {current}."}
+        batch["current_count"] = current - int(death_count)
+        print(f"[Supabase Fallback] Decremented count by {death_count} locally to {batch['current_count']}.")
+        return {"status": "success", "data": [batch]}
     try:
         # Fetch current count
         res_batch = supabase.table("batches").select("current_count").eq("id", batch_id).execute()
@@ -358,7 +392,9 @@ def record_mortality(batch_id, death_count):
             return {"status": "error", "message": f"Batch '{batch_id}' not found."}
             
         current = res_batch.data[0]["current_count"]
-        new_count = max(0, current - int(death_count))
+        if int(death_count) > current:
+            return {"status": "error", "message": f"Mortality count {death_count} cannot exceed current batch count {current}."}
+        new_count = current - int(death_count)
         
         res = supabase.table("batches").update({"current_count": new_count}).eq("id", batch_id).execute()
         return {"status": "success", "data": res.data}

@@ -35,6 +35,13 @@ class MortalityViewModel(application: Application) : AndroidViewModel(applicatio
     private val _submissionSuccess = MutableStateFlow(false)
     val submissionSuccess: StateFlow<Boolean> = _submissionSuccess.asStateFlow()
 
+    private val _uiError = MutableStateFlow<String?>(null)
+    val uiError: StateFlow<String?> = _uiError.asStateFlow()
+
+    fun clearError() {
+        _uiError.value = null
+    }
+
     fun resetSubmissionStatus() {
         _submissionSuccess.value = false
     }
@@ -76,32 +83,31 @@ class MortalityViewModel(application: Application) : AndroidViewModel(applicatio
                 suspectedCause
             }
 
-            // 4. Create and save record
             val activeBatch = cacheManager.getCachedActiveBatch()
-            val record = MortalityRecord(
-                id = UUID.randomUUID().toString(),
+            if (activeBatch == null) {
+                _uiError.value = "No active batch found."
+                _isSubmitting.value = false
+                return@launch
+            }
+
+            val result = batchRepository.recordMortality(
+                batchId = activeBatch.id,
                 deathCount = deathCount,
-                symptoms = symptomsStr,
-                suspectedCause = actualCause,
-                timestamp = System.currentTimeMillis(),
-                temperature = temp,
-                humidity = humid,
-                ammoniaLevel = ammonia,
-                soundLevel = sound,
-                batchId = activeBatch?.id,
-                isSynced = false
+                reason = actualCause,
+                notes = symptomsStr,
+                recordedBy = "Farmer"
             )
 
-            repository.insertRecord(record)
-            
-            // Sync with backend
-            batchRepository.syncUnsyncedMortalities()
-            
-            // 5. Update overall cached mortalities for dashboard context syncing
-            cacheManager.cacheLoggedMortalities(deathCount)
-
-            _isSubmitting.value = false
-            _submissionSuccess.value = true
+            result.fold(
+                onSuccess = {
+                    _isSubmitting.value = false
+                    _submissionSuccess.value = true
+                },
+                onFailure = { error ->
+                    _uiError.value = error.localizedMessage ?: "Failed to log mortality."
+                    _isSubmitting.value = false
+                }
+            )
         }
     }
 

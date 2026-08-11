@@ -12,6 +12,15 @@ interface VetDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(vets: List<Veterinarian>)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(vet: Veterinarian)
+
     @Query("UPDATE veterinarians SET availability = :status WHERE id = :id")
     suspend fun updateAvailability(id: String, status: String)
+
+    @Query("UPDATE veterinarians SET verificationStatus = :status WHERE id = :id")
+    suspend fun updateVerificationStatus(id: String, status: String)
+
+    @Query("SELECT COUNT(*) FROM veterinarians")
+    suspend fun getCount(): Int
 }

@@ -7,6 +7,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.poultryguard.ai.data.model.UserProfile
 import com.poultryguard.ai.data.model.UserRole
+import com.poultryguard.ai.data.cache.LocalCacheManager
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -33,7 +34,9 @@ class FirebaseAuthRepository(private val context: Context) : AuthRepository {
         val simulatedUsersDb = mutableMapOf<String, UserProfile>(
             "farmer@poultry.ai" to UserProfile("sim_1", "Joe Patterson", "farmer@poultry.ai", UserRole.FARMER, joinDate = "31 May 2026"),
             "vet@poultry.ai" to UserProfile("sim_2", "Dr. Sarah Jenkins", "vet@poultry.ai", UserRole.VETERINARIAN, joinDate = "31 May 2026"),
-            "admin@poultry.ai" to UserProfile("sim_3", "Admin Control Desk", "admin@poultry.ai", UserRole.ADMIN, joinDate = "31 May 2026")
+            "admin@poultry.ai" to UserProfile("sim_3", "Admin Control Desk", "admin@poultry.ai", UserRole.ADMIN, joinDate = "31 May 2026"),
+            "vendor@poultry.ai" to UserProfile("sim_4", "Vendor Control Desk", "vendor@poultry.ai", UserRole.ADMIN, joinDate = "31 May 2026"),
+            "superadmin@poultry.ai" to UserProfile("sim_5", "Super Admin Master", "superadmin@poultry.ai", UserRole.SUPER_ADMIN, joinDate = "31 May 2026")
         )
     }
 
@@ -74,8 +77,9 @@ class FirebaseAuthRepository(private val context: Context) : AuthRepository {
                 } else {
                     // Implicitly register a new user in simulation if they provide a valid role email format
                     val detectedRole = when {
+                        lowerEmail.contains("superadmin") || lowerEmail.contains("super_admin") -> UserRole.SUPER_ADMIN
                         lowerEmail.contains("vet") -> UserRole.VETERINARIAN
-                        lowerEmail.contains("admin") -> UserRole.ADMIN
+                        lowerEmail.contains("admin") || lowerEmail.contains("vendor") -> UserRole.ADMIN
                         else -> UserRole.FARMER
                     }
                     val newProfile = UserProfile(
