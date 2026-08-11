@@ -26,15 +26,16 @@ def search_knowledge_base(query, k=3):
     """
     Search Qdrant Cloud for the top k matching chunks.
     Returns:
-        list of str: Retrieved document chunks or empty list if unconfigured/failed.
+        list of str: Retrieved document chunks.
+        None: If client is unconfigured, collection is missing, or query failed.
     """
     if client is None:
-        return []
+        return None
     try:
         # Verify collection exists before querying
         if not client.collection_exists(collection_name):
             print(f"[Qdrant Search] Warning: Collection '{collection_name}' does not exist.")
-            return []
+            return None
             
         # Run query using query_text. QdrantClient handles the embedding generation internally!
         results = client.query(
@@ -54,7 +55,8 @@ def search_knowledge_base(query, k=3):
         return chunks
     except Exception as e:
         print(f"[Qdrant Search Error] Failed to retrieve chunks for query '{query}': {e}")
-        return []
+        return None
+
 
 def recreate_and_index_collection(chunks_list):
     """

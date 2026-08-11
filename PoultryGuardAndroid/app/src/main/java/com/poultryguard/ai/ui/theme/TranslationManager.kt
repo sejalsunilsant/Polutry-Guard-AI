@@ -49,8 +49,21 @@ object Translations {
         "other" to "Other",
         "symptoms_custom" to "Custom Symptoms",
         "cause_distribution" to "Cause Distribution",
-        "avg_metrics" to "Average Telemetry During Death",
-        "delete" to "Delete"
+        "delete" to "Delete",
+        "start_batch" to "Start New Batch",
+        "batch_history" to "Batch History",
+        "close_batch" to "Close/Sell Batch",
+        "breed" to "Breed",
+        "initial_count" to "Initial Bird Count",
+        "current_count" to "Remaining Bird Count",
+        "start_date" to "Start Date",
+        "end_date" to "End Date",
+        "batch_id" to "Batch ID",
+        "no_active_batch" to "No active batch running.",
+        "mortality_rate" to "Mortality Rate",
+        "days_active" to "Days Active",
+        "confirm_close_batch" to "Confirm Close/Sell Batch",
+        "sell_close_action" to "Sell / Close"
     )
 
     private val hindiMap = mapOf(
@@ -88,8 +101,21 @@ object Translations {
         "other" to "अन्य",
         "symptoms_custom" to "कस्टम लक्षण",
         "cause_distribution" to "मृत्यु कारण वितरण",
-        "avg_metrics" to "मृत्यु के समय औसत सेंसर डेटा",
-        "delete" to "हटाएं"
+        "delete" to "हटाएं",
+        "start_batch" to "नया बैच शुरू करें",
+        "batch_history" to "बैच इतिहास",
+        "close_batch" to "बैच बंद/बेचें",
+        "breed" to "नस्ल",
+        "initial_count" to "शुरुआती पक्षियों की संख्या",
+        "current_count" to "शेष पक्षियों की संख्या",
+        "start_date" to "शुरू होने की तिथि",
+        "end_date" to "समाप्ति की तिथि",
+        "batch_id" to "बैच आईडी",
+        "no_active_batch" to "कोई सक्रिय बैच नहीं चल रहा है।",
+        "mortality_rate" to "मृत्यु दर",
+        "days_active" to "सक्रिय दिन",
+        "confirm_close_batch" to "बैच बंद/बेचने की पुष्टि करें",
+        "sell_close_action" to "बेचें / बंद करें"
     )
 
     private val marathiMap = mapOf(
@@ -127,8 +153,21 @@ object Translations {
         "other" to "इतर",
         "symptoms_custom" to "कस्टम लक्षणे",
         "cause_distribution" to "मृत्यू कारण वितरण",
-        "avg_metrics" to "मृत्यूच्या वेळची सरासरी सेन्सर आकडेवारी",
-        "delete" to "काढून टाका"
+        "delete" to "काढून टाका",
+        "start_batch" to "नवीन बॅच सुरू करा",
+        "batch_history" to "बॅच इतिहास",
+        "close_batch" to "बॅच बंद/विक्री करा",
+        "breed" to "जात",
+        "initial_count" to "सुरुवाती पक्षांची संख्या",
+        "current_count" to "उर्वरित पक्षांची संख्या",
+        "start_date" to "सुरू होण्याची तारीख",
+        "end_date" to "शेवटची तारीख",
+        "batch_id" to "बॅच आयडी",
+        "no_active_batch" to "कोणतीही सक्रिय बॅच सुरू नाही.",
+        "mortality_rate" to "मृत्यू दर",
+        "days_active" to "सक्रिय दिवस",
+        "confirm_close_batch" to "बॅच बंद/विक्रीची पुष्टी करा",
+        "sell_close_action" to "विक्री / बंद करा"
     )
 
     fun translate(key: String, lang: AppLanguage): String {

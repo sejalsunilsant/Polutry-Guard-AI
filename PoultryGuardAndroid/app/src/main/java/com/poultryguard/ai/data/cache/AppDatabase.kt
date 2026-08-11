@@ -6,12 +6,22 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.poultryguard.ai.data.model.MortalityRecord
 import com.poultryguard.ai.data.model.Veterinarian
+import com.poultryguard.ai.data.model.SystemStats
+import com.poultryguard.ai.data.model.FarmerProfile
+import com.poultryguard.ai.data.model.SupportTicket
+import com.poultryguard.ai.data.model.Alert
+import com.poultryguard.ai.data.model.VeterinaryCase
 
-@Database(entities = [MortalityRecord::class, Veterinarian::class], version = 2, exportSchema = false)
+@Database(entities = [MortalityRecord::class, Veterinarian::class, SystemStats::class, FarmerProfile::class, SupportTicket::class, Alert::class, VeterinaryCase::class], version = 10, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun mortalityDao(): MortalityDao
     abstract fun vetDao(): VetDao
+    abstract fun systemStatsDao(): SystemStatsDao
+    abstract fun farmerProfileDao(): FarmerProfileDao
+    abstract fun supportTicketDao(): SupportTicketDao
+    abstract fun alertDao(): AlertDao
+    abstract fun veterinaryCaseDao(): VeterinaryCaseDao
 
     companion object {
         @Volatile

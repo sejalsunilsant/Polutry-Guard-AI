@@ -35,10 +35,17 @@ class ImagePredictor:
         # 2. Try TFLite loader
         if os.path.exists(tflite_path):
             try:
+                import sys
                 try:
-                    import tflite_runtime.interpreter as tflite
+                    if sys.platform == "win32":
+                        import tensorflow.lite as tflite
+                    else:
+                        try:
+                            import tflite_runtime.interpreter as tflite
+                        except ImportError:
+                            import tensorflow.lite as tflite
                 except ImportError:
-                    import tensorflow.lite as tflite
+                    raise ImportError("TFLite runtime libraries (tensorflow or tflite-runtime) not installed.")
                 print(f"[Image Predictor] Loading TFLite model from: {tflite_path}")
                 cls._tflite_interpreter = tflite.Interpreter(model_path=tflite_path)
                 cls._tflite_interpreter.allocate_tensors()
@@ -166,15 +173,8 @@ class ImagePredictor:
             pred_class = max(probabilities, key=probabilities.get)
             confidence = probabilities[pred_class]
             
-            if confidence < confidence_threshold:
-                pred_class = "Uncertain"
-                
-            return {
-                "prediction": pred_class,
-                "confidence": float(confidence),
-                "probabilities": probabilities,
-                "status": "fallback"
-            }
+            probs_list = [probabilities[c] for c in cls._classes]
+            return cls._format_output(probs_list, confidence_threshold, "fallback")
 
     @classmethod
     def _format_output(cls, probabilities, confidence_threshold, status):
@@ -186,10 +186,22 @@ class ImagePredictor:
             prediction = "Uncertain"
 
         probs_dict = {cls._classes[i]: float(probabilities[i]) for i in range(len(cls._classes))}
+        
+        # Map visual classes to specific visual symptoms
+        symptoms = {
+            "lethargy": probs_dict.get("Lethargic", 0.0),
+            "sitting_lying": probs_dict.get("Huddling", 0.0),
+            "abnormal_posture": probs_dict.get("Huddling", 0.0) * 0.7 + probs_dict.get("Lethargic", 0.0) * 0.3,
+            "reduced_activity": probs_dict.get("Lethargic", 0.0),
+            "abnormal_appearance": probs_dict.get("Lethargic", 0.0) * 0.5 + probs_dict.get("Huddling", 0.0) * 0.5,
+            "scabby_lesions": probs_dict.get("Lethargic", 0.0) * 0.3,  # proxy for lesion probability if lethargic
+            "normal_posture_activity": probs_dict.get("Normal", 0.0)
+        }
 
         return {
             "prediction": prediction,
             "confidence": confidence,
             "probabilities": probs_dict,
+            "symptoms": symptoms,
             "status": status
         }

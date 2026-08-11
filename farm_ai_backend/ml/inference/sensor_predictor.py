@@ -33,11 +33,11 @@ class SensorPredictor:
             except Exception as e:
                 print(f"[Sensor Predictor] Error loading model files: {e}")
                 cls._model = None
-                cls._classes = None
+                cls._classes = ["Coccidiosis", "Fowlpox", "Healthy", "Infectious Bronchitis", "Newcastle"]
         else:
             print(f"[Sensor Predictor] WARNING: Model files not found at {model_path}. Fallback mock mode enabled.")
             cls._model = None
-            cls._classes = ["None", "Respiratory", "Digestive"]
+            cls._classes = ["Coccidiosis", "Fowlpox", "Healthy", "Infectious Bronchitis", "Newcastle"]
             
         return cls._model, cls._classes
 
@@ -49,7 +49,7 @@ class SensorPredictor:
             sensor_features (list): Preprocessed list [temperature, humidity, ammonia]
         Returns:
             dict: {
-                "prediction": str ("None" | "Respiratory" | "Digestive"),
+                "prediction": str ("Healthy" | "Coccidiosis" | "Newcastle" | "Avian Influenza" | "Fowlpox" | "Infectious Bronchitis"),
                 "confidence": float,
                 "probabilities": dict mapping class -> float probability,
                 "status": str ("success" | "fallback" | "error")
@@ -59,7 +59,7 @@ class SensorPredictor:
         
         if not sensor_features or len(sensor_features) < 2:
             return {
-                "prediction": "None",
+                "prediction": "Healthy",
                 "confidence": 0.0,
                 "probabilities": {},
                 "status": "error",
@@ -77,26 +77,30 @@ class SensorPredictor:
             
         if cls._model is None:
             # Fallback mock mode: deterministic calculations based on stress thresholds
-            # High ammonia or temperature stress raises risk
             probabilities = {c: 0.05 for c in cls._classes}
             if temp >= 30.0:
-                probabilities["Respiratory"] = 0.65
-                probabilities["None"] = 0.25
-                probabilities["Digestive"] = 0.10
+                probabilities["Infectious Bronchitis"] = 0.50
+                probabilities["Newcastle"] = 0.30
+                probabilities["Healthy"] = 0.10
             elif hum_fraction >= 0.75:
-                probabilities["Digestive"] = 0.60
-                probabilities["None"] = 0.25
-                probabilities["Respiratory"] = 0.15
+                probabilities["Coccidiosis"] = 0.60
+                probabilities["Healthy"] = 0.25
+                probabilities["Fowlpox"] = 0.10
             else:
-                probabilities["None"] = 0.90
-                probabilities["Respiratory"] = 0.05
-                probabilities["Digestive"] = 0.05
+                probabilities["Healthy"] = 0.80
+                probabilities["Coccidiosis"] = 0.05
+                probabilities["Fowlpox"] = 0.05
                 
             pred_class = max(probabilities, key=probabilities.get)
+            
+            # Ensure all 6 categories exist in output
+            probs_dict = {c: float(probabilities.get(c, 0.05)) for c in cls._classes}
+            probs_dict["Avian Influenza"] = 0.05
+            
             return {
                 "prediction": pred_class,
-                "confidence": float(probabilities[pred_class]),
-                "probabilities": probabilities,
+                "confidence": float(probs_dict[pred_class]),
+                "probabilities": probs_dict,
                 "status": "fallback"
             }
 
@@ -116,6 +120,10 @@ class SensorPredictor:
             
             probs_dict = {cls._classes[i]: float(probabilities[i]) for i in range(len(cls._classes))}
             
+            # Ensure Avian Influenza is present in dict (as 0.0 risk from temp/humidity if not in classes)
+            if "Avian Influenza" not in probs_dict:
+                probs_dict["Avian Influenza"] = 0.0
+                
             return {
                 "prediction": prediction,
                 "confidence": confidence,
@@ -125,7 +133,7 @@ class SensorPredictor:
         except Exception as e:
             print(f"[Sensor Predictor] Prediction error: {e}")
             return {
-                "prediction": "None",
+                "prediction": "Healthy",
                 "confidence": 0.0,
                 "probabilities": {},
                 "status": "error",

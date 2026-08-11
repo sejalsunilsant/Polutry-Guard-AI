@@ -3,7 +3,7 @@ import numpy as np
 import librosa
 import os
 from services.thingspeak_service import ThingSpeakService
-from data.supabase_client import update_device_thingspeak_config, save_telemetry
+from data.supabase_client import update_device_thingspeak_config, save_telemetry, get_last_prediction, get_last_telemetry
 from ml.manager import ModelManager
 from ml.preprocessing import (
     preprocess_sensor_data, scale_sensor_features, engineer_sensor_features,
@@ -86,15 +86,65 @@ def ingest_thingspeak():
         # 5.1 Run Telemetry Model Inference (XGBoost via ModelManager)
         sensor_pred = ModelManager.predict_sensor(sensor_features)
         
+        # Determine sound level from feed or default
+        sound_level = 50.0
+
+        # 5.2 Store Telemetry to Supabase first (as per flowchart)
+        telemetry_id = None
+        try:
+            telemetry_res = save_telemetry(
+                device_id=device_id,
+                temperature=temp,
+                humidity=hum,
+                ammonia=ammonia,
+                sound_level=sound_level,
+                farm_id=farm_id
+            )
+            if telemetry_res and telemetry_res.get("status") == "success" and telemetry_res.get("data"):
+                telemetry_id = telemetry_res["data"][0].get("id")
+        except Exception as se:
+            print(f"[Ingestion Route] Database telemetry logging failed: {se}")
+
+        # 5.3 Fetch previous prediction and previous telemetry to check rate limit
+        prev_prediction = get_last_prediction(device_id)
+        telemetry_history = get_last_telemetry(device_id, limit=2)
+        prev_telemetry = None
+        if isinstance(telemetry_history, list) and len(telemetry_history) >= 2:
+            prev_telemetry = telemetry_history[1]
+
+        # 5.4 Parse timestamps and previous readings
+        last_processed_time = None
+        last_capture_time = None
+        prev_temp = None
+        prev_hum = None
+        prev_sound = None
+        
+        from datetime import datetime
+        def parse_timestamp(ts_str):
+            if not ts_str:
+                return None
+            if ts_str.endswith('Z'):
+                ts_str = ts_str[:-1] + '+00:00'
+            try:
+                return datetime.fromisoformat(ts_str)
+            except Exception:
+                return None
+
+        if prev_prediction:
+            last_processed_time = parse_timestamp(prev_prediction.get("created_at"))
+            last_capture_time = last_processed_time
+            
+        if prev_telemetry:
+            prev_temp = prev_telemetry.get("temperature")
+            prev_hum = prev_telemetry.get("humidity")
+            prev_sound = prev_telemetry.get("sound_level")
+        
         # 6. Preprocessing & Inference Layer: Audio (Conditional Ingestion)
         sound_url = validated_data.get('sound_url')
         
-        # Determine sound level from feed or default
-        sound_level = 50.0
-        
         should_process_audio = should_trigger_audio_processing(
             sound_level=sound_level, 
-            last_processed_time=None,  # We can extend this to lookup in DB later
+            last_processed_time=last_processed_time,
             force_request=force_audio,
             sound_threshold=78.0
         )
@@ -142,7 +192,10 @@ def ingest_thingspeak():
             temp=temp,
             hum=hum,
             sound=sound_level,
-            last_capture_time=None,  # We can extend this to lookup in DB later
+            prev_temp=prev_temp,
+            prev_hum=prev_hum,
+            prev_sound=prev_sound,
+            last_capture_time=last_capture_time,
             time_threshold_minutes=10
         ) or force_image
         
@@ -167,22 +220,6 @@ def ingest_thingspeak():
                 'processed': False,
                 'status': 'skipped_by_trigger_rules' if image_url else 'no_url_available'
             }
-
-        # 8. Store Telemetry and run Decision Fusion
-        telemetry_id = None
-        try:
-            telemetry_res = save_telemetry(
-                device_id=device_id,
-                temperature=temp,
-                humidity=hum,
-                ammonia=ammonia,
-                sound_level=sound_level,
-                farm_id=farm_id
-            )
-            if telemetry_res and telemetry_res.get("status") == "success" and telemetry_res.get("data"):
-                telemetry_id = telemetry_res["data"][0].get("id")
-        except Exception as se:
-            print(f"[Ingestion Route] Database telemetry logging failed: {se}")
             
         # Execute Decision Fusion and save prediction
         fused_result = fuse_and_store(

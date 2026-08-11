@@ -9,13 +9,21 @@ data class MortalityRecord(
     @PrimaryKey
     val id: String = UUID.randomUUID().toString(),
     val deathCount: Int,
-    val symptoms: String,
-    val suspectedCause: String,
+    val reason: String,
+    val notes: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
+    val recordedBy: String = "Farmer",
+    
+    // Legacy support fields
+    val symptoms: String = "Unspecified",
+    val suspectedCause: String = "Unspecified",
     
     // Automated Environmental Snapshot
-    val temperature: Float,
-    val humidity: Float,
-    val ammoniaLevel: Float,
-    val soundLevel: Float
+    val temperature: Float = 0f,
+    val humidity: Float = 0f,
+    val ammoniaLevel: Float = 0f,
+    val soundLevel: Float = 0f,
+    
+    val batchId: String? = null,
+    val isSynced: Boolean = false
 )

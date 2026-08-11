@@ -237,7 +237,7 @@ class ChatRepository(private val context: Context) {
                 }
             }
             else -> {
-                "Hii ! I am your AI Copilot. (Operating in Offline Mode). Ask me about air quality, bird health, temperature management, or mortality rates."
+                "Hii ! I am ChickBot."
             }
         }
     }

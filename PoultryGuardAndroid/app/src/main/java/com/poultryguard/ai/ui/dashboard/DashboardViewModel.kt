@@ -14,7 +14,11 @@ import com.poultryguard.ai.data.model.ConnectionState
 import com.poultryguard.ai.data.model.SensorReading
 import com.poultryguard.ai.data.model.SensorStatus
 import com.poultryguard.ai.data.model.MortalityRecord
+import com.poultryguard.ai.data.model.Batch
+import com.poultryguard.ai.data.model.BatchStatus
+import com.poultryguard.ai.data.model.ageDays
 import com.poultryguard.ai.data.repository.MortalityRepository
+import com.poultryguard.ai.data.repository.BatchRepository
 import com.poultryguard.ai.data.mqtt.MqttManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,10 +34,11 @@ sealed interface DashboardUiState {
     data class Success(
         val sensorReadings: List<SensorReading>,
         val connectionState: ConnectionState,
-        val shedName: String = "Shed #4 (Broilers - Day 18)",
-        val birdCount: Int = 12500,
+        val shedName: String,
+        val birdCount: Int,
         val loggedMortalities: Int = 0,
         val alertCount: Int = 0,
+        val activeBatch: Batch? = null,
         val diseasePrediction: DiseasePredictionResponse = DiseasePredictionResponse(
             riskLevel = DiseaseRiskLevel.LOW,
             confidence = 0.95f,
@@ -57,7 +62,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         listOf(
             ChatMessage(
                 sender = "AI",
-                text = "Hi Joe! 🐔 I am your AI Farm Assistant. I am monitoring Shed #4 in real-time. Ask me any biosecurity or temperature safety questions!"
+                text = "Hi Joe! 🐔 I am ChickBot, your AI Farm Assistant. I am monitoring Shed #4 in real-time. Ask me any biosecurity or temperature safety questions!"
             )
         )
     )
@@ -70,6 +75,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val chatRepository = ChatRepository(application.applicationContext)
     private val cacheManager = LocalCacheManager(application.applicationContext)
     private val mortalityRepository = MortalityRepository(application.applicationContext)
+    private val batchRepository = BatchRepository(application.applicationContext)
     private var mqttManager: MqttManager? = null
 
     private var currentTemp = 24.2f
@@ -77,8 +83,8 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private var currentAmmonia = 12.0f
     private var currentSound = 54.0f
     
-    private val initialBirdCount = 12500
-    private var loggedMortalities = 0
+    private var activeBatch: Batch? = null
+    private var unsyncedMortalities = 0
 
     private var activeMqttConnection = false
     private var currentPrediction = DiseasePredictionResponse(
@@ -99,12 +105,23 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         currentAmmonia = cachedTelemetry["ammonia"] ?: 12.0f
         currentSound = cachedTelemetry["sound"] ?: 54.0f
         
-        loggedMortalities = cacheManager.getCachedMortalities()
+        activeBatch = cacheManager.getCachedActiveBatch()
     }
 
     private fun loadInitialData() {
         viewModelScope.launch {
             _uiState.value = DashboardUiState.Loading
+            
+            // Sync outbox
+            batchRepository.syncUnsyncedMortalities()
+            
+            // Get active batch from repository
+            val batchResult = batchRepository.getActiveBatch("default_farm")
+            batchResult.onSuccess { batch ->
+                activeBatch = batch
+                unsyncedMortalities = batch?.let { batchRepository.getUnsyncedMortalityCount(it.id) } ?: 0
+            }
+            
             delay(1000)
             setupMqtt()
             updateDashboardState()
@@ -150,31 +167,30 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         if (deathCount <= 0) return
         
         viewModelScope.launch {
-            cacheManager.cacheLoggedMortalities(deathCount)
-            loggedMortalities = cacheManager.getCachedMortalities()
+            val currentBatch = activeBatch ?: return@launch
+            if (deathCount > currentBatch.currentCount) return@launch
             
-            // Create a complete MortalityRecord with environmental snapshot
-            val record = MortalityRecord(
-                id = java.util.UUID.randomUUID().toString(),
+            val result = batchRepository.recordMortality(
+                batchId = currentBatch.id,
                 deathCount = deathCount,
-                symptoms = if (symptoms.isEmpty()) "Unspecified" else symptoms.joinToString(", "),
-                suspectedCause = "Sudden Death Syndrome", // Default suspect from quick dashboard log
-                timestamp = System.currentTimeMillis(),
-                temperature = currentTemp,
-                humidity = currentHumid,
-                ammoniaLevel = currentAmmonia,
-                soundLevel = currentSound
+                reason = "Sudden Death Syndrome",
+                notes = if (symptoms.isEmpty()) "Unspecified" else symptoms.joinToString(", "),
+                recordedBy = "Farmer"
             )
-            mortalityRepository.insertRecord(record)
             
-            if (symptoms.isNotEmpty() && symptoms.contains("Respiratory Snick")) {
-                currentPrediction = DiseasePredictionResponse(
-                    riskLevel = DiseaseRiskLevel.HIGH,
-                    confidence = 0.90f,
-                    recommendation = "HIGH DISEASE RISK: Active coughing (Snick) symptoms logged alongside telemetry. Cycle fans to ventilate."
-                )
+            result.onSuccess { updated ->
+                activeBatch = updated
+                unsyncedMortalities = batchRepository.getUnsyncedMortalityCount(updated.id)
+                
+                if (symptoms.isNotEmpty() && symptoms.contains("Respiratory Snick")) {
+                    currentPrediction = DiseasePredictionResponse(
+                        riskLevel = DiseaseRiskLevel.HIGH,
+                        confidence = 0.90f,
+                        recommendation = "HIGH DISEASE RISK: Active coughing (Snick) symptoms logged alongside telemetry. Cycle fans to ventilate."
+                    )
+                }
+                updateDashboardState()
             }
-            updateDashboardState()
         }
     }
 
@@ -189,13 +205,20 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             _isTyping.value = true
             
             // Build real-time context
+            val currentBatch = activeBatch
+            val dynamicBirdCount = if (currentBatch != null) {
+                (currentBatch.currentCount - unsyncedMortalities).coerceAtLeast(0)
+            } else {
+                0
+            }
             val context = FarmContext(
                 currentTemperature = currentTemp,
                 currentHumidity = currentHumid,
                 currentAmmonia = currentAmmonia,
                 currentSoundLevel = currentSound,
-                birdCount = initialBirdCount - loggedMortalities,
-                loggedMortalities = loggedMortalities
+                birdCount = dynamicBirdCount,
+                loggedMortalities = unsyncedMortalities,
+                activeShed = currentBatch?.let { "${it.id} (${it.breed})" } ?: "No Active Batch"
             )
 
             // Dynamic background completion request
@@ -215,21 +238,61 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _isRefreshing.value = true
             setupMqtt()
+            
+            // Sync outbox
+            batchRepository.syncUnsyncedMortalities()
+            
+            val batchResult = batchRepository.getActiveBatch("default_farm")
+            batchResult.onSuccess { batch ->
+                activeBatch = batch
+                unsyncedMortalities = batch?.let { batchRepository.getUnsyncedMortalityCount(it.id) } ?: 0
+            }
+            
             delay(800)
             _isRefreshing.value = false
+            updateDashboardState()
         }
     }
 
     fun refreshMortalityCount() {
-        loggedMortalities = cacheManager.getCachedMortalities()
-        updateDashboardState()
+        viewModelScope.launch {
+            val batchResult = batchRepository.getActiveBatch("default_farm")
+            batchResult.onSuccess { batch ->
+                activeBatch = batch
+                unsyncedMortalities = batch?.let { batchRepository.getUnsyncedMortalityCount(it.id) } ?: 0
+            }
+            updateDashboardState()
+        }
+    }
+
+    fun startNewBatch(startDate: String, initialCount: Int, breed: String, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            val result = batchRepository.startBatch("default_farm", startDate, initialCount, breed)
+            result.onSuccess { newBatch ->
+                activeBatch = newBatch
+                unsyncedMortalities = 0
+                updateDashboardState()
+                onSuccess()
+            }
+        }
+    }
+
+    fun closeActiveBatch(status: BatchStatus, endDate: String, currentCount: Int, onSuccess: () -> Unit) {
+        val currentBatch = activeBatch ?: return
+        viewModelScope.launch {
+            val result = batchRepository.closeBatch(currentBatch.id, status, endDate, currentCount)
+            result.onSuccess {
+                activeBatch = null
+                unsyncedMortalities = 0
+                updateDashboardState()
+                onSuccess()
+            }
+        }
     }
 
     private fun updateDashboardState() {
         val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         val timeStr = dateFormat.format(Date())
-
-        loggedMortalities = cacheManager.getCachedMortalities()
 
         val readings = listOf(
             SensorReading(
@@ -280,12 +343,27 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
         val alertCount = readings.count { it.status != SensorStatus.IDEAL }
 
+        val currentBatch = activeBatch
+        val dynamicBirdCount = if (currentBatch != null) {
+            (currentBatch.currentCount - unsyncedMortalities).coerceAtLeast(0)
+        } else {
+            0
+        }
+        
+        val dynamicShedName = if (currentBatch != null) {
+            "Shed #4 (${currentBatch.id} - ${currentBatch.breed} - Day ${currentBatch.ageDays})"
+        } else {
+            "No Active Batch"
+        }
+
         _uiState.value = DashboardUiState.Success(
             sensorReadings = readings,
             connectionState = if (activeMqttConnection) ConnectionState.CONNECTED else ConnectionState.CONNECTING,
             alertCount = alertCount,
-            birdCount = initialBirdCount - loggedMortalities,
-            loggedMortalities = loggedMortalities,
+            birdCount = dynamicBirdCount,
+            loggedMortalities = unsyncedMortalities,
+            shedName = dynamicShedName,
+            activeBatch = currentBatch,
             diseasePrediction = currentPrediction,
             isMqttConnected = activeMqttConnection
         )

@@ -19,52 +19,38 @@ def predict_disease_endpoint():
         farm_id = data.get('farmId', 'default_farm')
 
         # 1. Base prediction using XGBoost trained on Temperature and Humidity
-        xgb_result = predict_disease(temp, humid)
+        sensor_pred = ModelManager.predict_sensor([temp, humid, ammonia])
         
-        # Default fallback values
-        risk_level = "LOW"
-        confidence = 0.95
-        recommendation = "Environment is stable and within ideal comfort range."
-        disease_name = "None"
+        # 2. Call the fusion engine with sensor predictor results
+        from ml.fusion.decision_engine import fuse_decisions
+        fused_disease, confidence, prob_map = fuse_decisions(temp, humid, ammonia, sensor_pred, None, None)
         
-        if xgb_result and xgb_result.get("status") == "success":
-            predicted_class = xgb_result.get("prediction")
-            confidence = xgb_result.get("confidence")
-            disease_name = predicted_class if predicted_class else "None"
+        # 3. Determine risk level
+        if fused_disease == "Healthy":
+            risk_level = "LOW"
+        elif confidence >= 0.70:
+            risk_level = "HIGH"
+        else:
+            risk_level = "MEDIUM"
             
-            # Map model class to risk level
-            if predicted_class == "Respiratory":
-                risk_level = "HIGH"
-                recommendation = "ELEVATED RESPIRATORY RISK: XGBoost model predicts Respiratory incidence. Ensure ventilation rates are adequate."
-            elif predicted_class == "Digestive":
-                risk_level = "MEDIUM"
-                recommendation = "DIGESTIVE RISK: XGBoost model predicts Digestive incidence. Keep litter dry to prevent coccidiosis spores."
-            elif predicted_class == "Other":
-                risk_level = "MEDIUM"
-                recommendation = "MEDIUM RISK: Standard biosecurity alerts active. Inspect flock health sweeps."
-            else:
-                risk_level = "LOW"
-                recommendation = "LOW RISK: Ideal environment conditions."
-        
-        # 2. Safety Overrides (Ammonia & Sound Level thresholds)
         if ammonia >= 25.0:
             risk_level = "HIGH"
-            confidence = max(confidence, 0.92)
-            recommendation = "HIGH DISEASE RISK: Critical Ammonia levels (>25 ppm). Turn exhaust fans to 100% and treat wet litter immediately."
-        elif temp >= 30.0 and ammonia >= 18.0:
-            risk_level = "HIGH"
-            confidence = max(confidence, 0.90)
-            recommendation = "HIGH DISEASE RISK: Combined Heat Stress and elevated Ammonia. Increase ventilation and run cooling misters."
-        elif sound >= 78.0:
-            risk_level = "HIGH"
-            confidence = max(confidence, 0.88)
-            recommendation = "HIGH EVENT RISK: High noise levels detected (>78 dB). Check for flock panic, stampede, or power failure."
-        elif ammonia >= 18.0 or temp >= 28.0 or humid >= 75.0:
-            # Upgrade to medium if not already high
-            if risk_level != "HIGH":
-                risk_level = "MEDIUM"
-                confidence = max(confidence, 0.75)
-                recommendation = "MEDIUM RISK: Slight sensor deviations (high temp, humidity, or gas). Increase air cycling ratios."
+            
+        # 4. Formulate recommendations
+        if ammonia >= 25.0:
+            recommendation = f"CRITICAL AMMONIA ALERT: Air quality is hazardous ({ammonia} ppm). Exhaust fans must run at 100% capacity."
+        elif fused_disease == "Newcastle":
+            recommendation = f"NEWCASTLE WARNING: High risk of Newcastle ({int(confidence * 100)}% confidence). Ensure quarantine and inspect flock."
+        elif fused_disease == "Avian Influenza":
+            recommendation = f"AVIAN INFLUENZA WARNING: High risk of Avian Influenza ({int(confidence * 100)}% confidence). Check for visual lethargy."
+        elif fused_disease == "Coccidiosis":
+            recommendation = f"COCCIDIOSIS DETECTED: Risk of digestive infection ({int(confidence * 100)}% confidence). Keep litter dry."
+        elif fused_disease == "Fowlpox":
+            recommendation = f"FOWLPOX ALERT: Risk of Fowlpox ({int(confidence * 100)}% confidence). Check comb/wattle lesions."
+        elif fused_disease == "Infectious Bronchitis":
+            recommendation = f"INFECTIOUS BRONCHITIS ALERT: Risk of IB respiratory infection ({int(confidence * 100)}% confidence). Gasping vocalizations possible."
+        else:
+            recommendation = "LOW RISK: Environment parameters are within stable ranges."
 
         # Log to Supabase PostgreSQL database
         from data.supabase_client import save_telemetry, save_prediction
@@ -76,7 +62,7 @@ def predict_disease_endpoint():
         except Exception as se:
             print(f"[Supabase Logging] Telemetry insertion failed: {se}")
 
-        save_prediction(device_id, disease_name, risk_level, confidence, recommendation, telemetry_id, farm_id)
+        save_prediction(device_id, fused_disease, risk_level, confidence, recommendation, telemetry_id, farm_id)
 
         return jsonify({
             'riskLevel': risk_level,
