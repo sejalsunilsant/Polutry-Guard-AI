@@ -23,14 +23,17 @@ class SoundPredictor:
         # 1. Try TFLite loader first
         if os.path.exists(tflite_path):
             try:
-                # Try importing tflite_runtime first, then fallback to tensorflow
+                import sys
                 try:
-                    import tflite_runtime.interpreter as tflite
-                except ImportError:
-                    try:
+                    if sys.platform == "win32":
                         import tensorflow.lite as tflite
-                    except ImportError:
-                        raise ImportError("TFLite runtime libraries (tflite-runtime or tensorflow) not installed.")
+                    else:
+                        try:
+                            import tflite_runtime.interpreter as tflite
+                        except ImportError:
+                            import tensorflow.lite as tflite
+                except ImportError:
+                    raise ImportError("TFLite runtime libraries (tensorflow or tflite-runtime) not installed.")
 
                 print(f"[Sound Predictor] Loading TFLite model from: {tflite_path}")
                 cls._tflite_interpreter = tflite.Interpreter(model_path=tflite_path)
@@ -156,15 +159,8 @@ class SoundPredictor:
             pred_class = max(probs, key=probs.get)
             confidence = probs[pred_class]
             
-            if confidence < confidence_threshold:
-                pred_class = "Uncertain"
-
-            return {
-                "prediction": pred_class,
-                "confidence": float(confidence),
-                "probabilities": probs,
-                "status": "fallback"
-            }
+            probs_list = [probs[l] for l in cls._labels]
+            return cls._format_output(probs_list, confidence_threshold, "fallback")
 
     @classmethod
     def _format_output(cls, probabilities, confidence_threshold, status):
@@ -176,10 +172,17 @@ class SoundPredictor:
             prediction = "Uncertain"
 
         probs_dict = {cls._labels[i]: float(probabilities[i]) for i in range(len(cls._labels))}
+        
+        # Map sound classes to specific acoustic symptoms
+        symptoms = {
+            "respiratory_sounds": probs_dict.get("Sick", 0.0),
+            "normal_acoustic_pattern": probs_dict.get("Healthy", 0.0)
+        }
 
         return {
             "prediction": prediction,
             "confidence": confidence,
             "probabilities": probs_dict,
+            "symptoms": symptoms,
             "status": status
         }

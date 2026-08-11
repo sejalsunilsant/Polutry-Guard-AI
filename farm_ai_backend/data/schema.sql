@@ -75,3 +75,53 @@ ON CONFLICT (device_id) DO NOTHING;
 -- Migration helpers for existing databases
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS thingspeak_channel_id VARCHAR(50);
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS thingspeak_read_api_key VARCHAR(50);
+
+-- 6. Batches Table
+CREATE TABLE IF NOT EXISTS batches (
+    id VARCHAR(50) PRIMARY KEY, -- e.g. 'BATCH-001'
+    farm_id VARCHAR(50) REFERENCES farms(id) ON DELETE CASCADE NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE,
+    initial_count INTEGER NOT NULL CHECK (initial_count > 0),
+    current_count INTEGER NOT NULL CHECK (current_count >= 0),
+    status VARCHAR(20) DEFAULT 'ACTIVE' NOT NULL CHECK (status IN ('ACTIVE', 'SOLD', 'CLOSED')),
+    breed VARCHAR(50) DEFAULT 'Broiler' NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    CONSTRAINT chk_count CHECK (current_count <= initial_count)
+);
+
+-- View for dynamic age_days calculation
+CREATE OR REPLACE VIEW v_batches AS
+SELECT 
+    id,
+    farm_id,
+    start_date,
+    end_date,
+    initial_count,
+    current_count,
+    status,
+    breed,
+    created_at,
+    CASE 
+        WHEN status IN ('SOLD', 'CLOSED') AND end_date IS NOT NULL THEN (end_date - start_date)
+        ELSE (CURRENT_DATE - start_date)
+    END AS age_days
+FROM batches;
+
+-- Link existing tables to batches
+ALTER TABLE sensor_telemetry ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50) REFERENCES batches(id) ON DELETE SET NULL;
+ALTER TABLE disease_predictions ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50) REFERENCES batches(id) ON DELETE SET NULL;
+
+-- 7. Grant Privileges for Supabase API access (anon and authenticated roles)
+GRANT ALL PRIVILEGES ON TABLE public.farms TO anon, authenticated;
+GRANT ALL PRIVILEGES ON TABLE public.devices TO anon, authenticated;
+GRANT ALL PRIVILEGES ON TABLE public.sensor_telemetry TO anon, authenticated;
+GRANT ALL PRIVILEGES ON TABLE public.disease_predictions TO anon, authenticated;
+GRANT ALL PRIVILEGES ON TABLE public.farm_settings TO anon, authenticated;
+GRANT ALL PRIVILEGES ON TABLE public.batches TO anon, authenticated;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
+
+-- Grant select on views
+GRANT SELECT ON public.v_batches TO anon, authenticated;
+
+

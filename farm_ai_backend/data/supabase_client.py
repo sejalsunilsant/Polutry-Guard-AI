@@ -1,4 +1,5 @@
 import os
+# pyrefly: ignore [missing-import]
 from supabase import create_client, Client
 
 # Load environment variables manually from .env if not loaded yet (useful for tests and scripts)
@@ -85,11 +86,15 @@ def save_telemetry(device_id, temperature, humidity, ammonia, sound_level, farm_
             "ammonia": float(ammonia),
             "sound_level": float(sound_level)
         }
+        active_batch = get_active_batch(farm_id)
+        if active_batch:
+            data["batch_id"] = active_batch.get("id")
         res = supabase.table("sensor_telemetry").insert(data).execute()
         return {"status": "success", "data": res.data}
     except Exception as e:
         print(f"[Supabase Error] Failed to log telemetry: {e}")
         return {"status": "error", "message": str(e)}
+
 
 def save_prediction(device_id, disease, risk_level, confidence, recommendation, telemetry_id=None, farm_id="default_farm"):
     """
@@ -108,6 +113,9 @@ def save_prediction(device_id, disease, risk_level, confidence, recommendation, 
             "confidence": float(confidence),
             "recommendation": recommendation
         }
+        active_batch = get_active_batch(farm_id)
+        if active_batch:
+            data["batch_id"] = active_batch.get("id")
         res = supabase.table("disease_predictions").insert(data).execute()
         return {"status": "success", "data": res.data}
     except Exception as e:
@@ -204,4 +212,159 @@ def update_device_thingspeak_config(device_id, farm_id, channel_id, read_api_key
     except Exception as e:
         print(f"[Supabase Error] Failed to update device config: {e}")
         return {"status": "error", "message": str(e)}
+
+
+def get_last_prediction(device_id):
+    """
+    Fetch the most recent disease prediction for a device.
+    """
+    if supabase is None:
+        return None
+    try:
+        res = supabase.table("disease_predictions")\
+            .select("*")\
+            .eq("device_id", device_id)\
+            .order("created_at", desc=True)\
+            .limit(1)\
+            .execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]
+        return None
+    except Exception as e:
+        print(f"[Supabase Error] Failed to fetch last prediction: {e}")
+        return None
+
+
+def get_last_telemetry(device_id, limit=1):
+    """
+    Fetch the most recent telemetry records for a device.
+    """
+    if supabase is None:
+        return None
+    try:
+        res = supabase.table("sensor_telemetry")\
+            .select("*")\
+            .eq("device_id", device_id)\
+            .order("created_at", desc=True)\
+            .limit(limit)\
+            .execute()
+        if res.data and len(res.data) > 0:
+            if limit == 1:
+                return res.data[0]
+            return res.data
+        return [] if limit > 1 else None
+    except Exception as e:
+        print(f"[Supabase Error] Failed to fetch last telemetry: {e}")
+        return [] if limit > 1 else None
+
+
+def create_batch(batch_id, farm_id, start_date, initial_count, breed="Broiler", status="ACTIVE"):
+    """
+    Register a new poultry batch for a farm.
+    """
+    if supabase is None:
+        print(f"[Supabase Fallback] Batch '{batch_id}' created locally.")
+        return {"status": "fallback", "data": [{"id": batch_id, "farm_id": farm_id, "status": status}]}
+    try:
+        data = {
+            "id": batch_id,
+            "farm_id": farm_id,
+            "start_date": start_date,
+            "initial_count": int(initial_count),
+            "current_count": int(initial_count),
+            "breed": breed,
+            "status": status
+        }
+        res = supabase.table("batches").insert(data).execute()
+        return {"status": "success", "data": res.data}
+    except Exception as e:
+        print(f"[Supabase Error] Failed to create batch: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+def get_active_batch(farm_id):
+    """
+    Fetch the currently active batch (using the v_batches view so we get calculated age_days).
+    """
+    if supabase is None:
+        return None
+    try:
+        res = supabase.table("v_batches")\
+            .select("*")\
+            .eq("farm_id", farm_id)\
+            .eq("status", "ACTIVE")\
+            .order("created_at", desc=True)\
+            .limit(1)\
+            .execute()
+        if res.data and len(res.data) > 0:
+            return res.data[0]
+        return None
+    except Exception as e:
+        print(f"[Supabase Error] Failed to fetch active batch: {e}")
+        return None
+
+
+def update_batch_status(batch_id, status, end_date=None, current_count=None):
+    """
+    Update batch status (e.g. mark as SOLD or CLOSED).
+    """
+    if supabase is None:
+        print(f"[Supabase Fallback] Batch '{batch_id}' status updated to '{status}'.")
+        return {"status": "fallback"}
+    try:
+        data = {"status": status}
+        if end_date:
+            data["end_date"] = end_date
+        if current_count is not None:
+            data["current_count"] = int(current_count)
+            
+        res = supabase.table("batches").update(data).eq("id", batch_id).execute()
+        return {"status": "success", "data": res.data}
+    except Exception as e:
+        print(f"[Supabase Error] Failed to update batch status: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+def get_all_batches(farm_id):
+    """
+    Fetch all batches (active, sold, closed) for a farm, ordered by created_at.
+    """
+    if supabase is None:
+        print(f"[Supabase Fallback] get_all_batches returning fallback list.")
+        return []
+    try:
+        res = supabase.table("v_batches")\
+            .select("*")\
+            .eq("farm_id", farm_id)\
+            .order("created_at", desc=True)\
+            .execute()
+        return res.data or []
+    except Exception as e:
+        print(f"[Supabase Error] Failed to fetch all batches: {e}")
+        return []
+
+
+def record_mortality(batch_id, death_count):
+    """
+    Safely decrement the current bird count of a batch due to mortality.
+    """
+    if supabase is None:
+        print(f"[Supabase Fallback] Deceremented count by {death_count} locally.")
+        return {"status": "fallback"}
+    try:
+        # Fetch current count
+        res_batch = supabase.table("batches").select("current_count").eq("id", batch_id).execute()
+        if not res_batch.data or len(res_batch.data) == 0:
+            return {"status": "error", "message": f"Batch '{batch_id}' not found."}
+            
+        current = res_batch.data[0]["current_count"]
+        new_count = max(0, current - int(death_count))
+        
+        res = supabase.table("batches").update({"current_count": new_count}).eq("id", batch_id).execute()
+        return {"status": "success", "data": res.data}
+    except Exception as e:
+        print(f"[Supabase Error] Failed to record batch mortality: {e}")
+        return {"status": "error", "message": str(e)}
+
+
 

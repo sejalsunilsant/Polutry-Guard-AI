@@ -20,6 +20,15 @@ interface MortalityDao {
     @Query("SELECT * FROM mortality_records ORDER BY timestamp DESC")
     suspend fun getAllRecords(): List<MortalityRecord>
 
+    @Query("SELECT * FROM mortality_records WHERE isSynced = 0")
+    suspend fun getUnsyncedRecords(): List<MortalityRecord>
+
+    @Query("UPDATE mortality_records SET isSynced = 1 WHERE id = :id")
+    suspend fun markAsSynced(id: String)
+
+    @Query("SELECT SUM(deathCount) FROM mortality_records WHERE batchId = :batchId AND isSynced = 0")
+    suspend fun getUnsyncedMortalityCountForBatch(batchId: String): Int?
+
     @Delete
     suspend fun delete(record: MortalityRecord)
 

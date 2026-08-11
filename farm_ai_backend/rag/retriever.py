@@ -9,13 +9,18 @@ def retrieve_relevant_chunks(query, k=3):
     """
     # 1. Try Qdrant Cloud vector database
     qdrant_chunks = search_knowledge_base(query, k=k)
-    if qdrant_chunks:
-        print(f"[RAG Retriever] Successfully retrieved {len(qdrant_chunks)} chunks from Qdrant Cloud.")
-        return qdrant_chunks
-
-    # 2. Local TF-IDF Fallback
-    print("[RAG Retriever] Qdrant Cloud unavailable or empty. Falling back to local TF-IDF.")
+    if qdrant_chunks is not None:
+        if len(qdrant_chunks) > 0:
+            print(f"[RAG Retriever] Successfully retrieved {len(qdrant_chunks)} chunks from Qdrant Cloud.")
+            return qdrant_chunks
+        else:
+            print(f"[RAG Retriever] No chunks matched query '{query}' above similarity threshold. Using local TF-IDF fallback.")
+    else:
+        # 2. Local TF-IDF Fallback
+        print("[RAG Retriever] Qdrant Cloud unavailable or empty. Falling back to local TF-IDF.")
+    
     chunks, vectorizer, tfidf_matrix = load_knowledge_base()
+
     if not chunks or vectorizer is None or tfidf_matrix is None:
         print("[RAG Retriever] Vector database is uninitialized. Returning empty list.")
         return []

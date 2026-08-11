@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.poultryguard.ai.data.cache.LocalCacheManager
 import com.poultryguard.ai.data.model.MortalityRecord
 import com.poultryguard.ai.data.repository.MortalityRepository
+import com.poultryguard.ai.data.repository.BatchRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +19,7 @@ class MortalityViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val repository = MortalityRepository(application.applicationContext)
     private val cacheManager = LocalCacheManager(application.applicationContext)
+    private val batchRepository = BatchRepository(application.applicationContext)
 
     // Reactive StateFlow of past records directly from Room database
     val historicalRecords: StateFlow<List<MortalityRecord>> = repository.getAllRecordsFlow()
@@ -75,6 +77,7 @@ class MortalityViewModel(application: Application) : AndroidViewModel(applicatio
             }
 
             // 4. Create and save record
+            val activeBatch = cacheManager.getCachedActiveBatch()
             val record = MortalityRecord(
                 id = UUID.randomUUID().toString(),
                 deathCount = deathCount,
@@ -84,10 +87,15 @@ class MortalityViewModel(application: Application) : AndroidViewModel(applicatio
                 temperature = temp,
                 humidity = humid,
                 ammoniaLevel = ammonia,
-                soundLevel = sound
+                soundLevel = sound,
+                batchId = activeBatch?.id,
+                isSynced = false
             )
 
             repository.insertRecord(record)
+            
+            // Sync with backend
+            batchRepository.syncUnsyncedMortalities()
             
             // 5. Update overall cached mortalities for dashboard context syncing
             cacheManager.cacheLoggedMortalities(deathCount)

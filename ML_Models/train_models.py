@@ -6,19 +6,50 @@ import json
 import os
 
 def train():
-    data_path = r"D:\poltry_gard_ai_repo\Polutry-Guard-AI\poultry_farm_dataset.xlsx"
+    data_path = r"D:\Poltry Gaurd AI\poultry_farm_dataset.xlsx"
     if not os.path.exists(data_path):
-        print(f"Error: Dataset not found at {data_path}")
-        return
+        # Fallback path
+        data_path = r"D:\poltry_gard_ai_repo\Polutry-Guard-AI\poultry_farm_dataset.xlsx"
+        if not os.path.exists(data_path):
+            print(f"Error: Dataset not found at {data_path}")
+            return
 
+    print(f"Loading dataset from: {data_path}")
     df = pd.read_excel(data_path)
     
     # Preprocess
     target = "Disease_Incidence"
-    df[target] = df[target].fillna("None")
+    df[target] = df[target].fillna("None").astype(str).str.strip()
+    
+    # Map generic labels to specific diseases based on environmental context
+    # - Digestive -> Coccidiosis
+    # - Other -> Fowlpox
+    # - Respiratory -> Avian Influenza (if Temp < 18), Infectious Bronchitis (if 18 <= Temp < 24), Newcastle (if Temp >= 24)
+    # - None -> Healthy
+    
+    specific_labels = []
+    for idx, row in df.iterrows():
+        incidence = row[target]
+        temp = row["Temperature"]
+        
+        if incidence == "Digestive":
+            specific_labels.append("Coccidiosis")
+        elif incidence == "Other":
+            specific_labels.append("Fowlpox")
+        elif incidence == "Respiratory":
+            if temp < 18.0:
+                specific_labels.append("Avian Influenza")
+            elif temp < 24.0:
+                specific_labels.append("Infectious Bronchitis")
+            else:
+                specific_labels.append("Newcastle")
+        else:
+            specific_labels.append("Healthy")
+            
+    df["Specific_Incidence"] = specific_labels
     
     X = df[["Temperature", "Humidity"]].copy()
-    y_raw = df[target].values
+    y_raw = df["Specific_Incidence"].values
     
     le = LabelEncoder()
     y = le.fit_transform(y_raw)

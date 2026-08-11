@@ -191,6 +191,12 @@ class FirebaseAuthRepository(private val context: Context) : AuthRepository {
     }
 
     override suspend fun logout(): Result<Unit> {
+        try {
+            LocalCacheManager(context).clearCache()
+        } catch (e: Exception) {
+            Log.w("AuthRepository", "Failed to clear cache on logout: ${e.localizedMessage}")
+        }
+
         if (!firebaseInitialized || auth == null) {
             simulatedUser = null
             return Result.success(Unit)
@@ -202,6 +208,7 @@ class FirebaseAuthRepository(private val context: Context) : AuthRepository {
             Result.failure(e)
         }
     }
+
 
     override suspend fun getCurrentUser(): UserProfile? {
         if (!firebaseInitialized || auth == null || db == null) {

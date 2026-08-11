@@ -6,6 +6,7 @@ import com.google.gson.Gson
 import com.poultryguard.ai.data.model.UserProfile
 import com.poultryguard.ai.data.model.FarmEvent
 import com.poultryguard.ai.data.model.HardwareKit
+import com.poultryguard.ai.data.model.Batch
 
 class LocalCacheManager(context: Context) {
 
@@ -192,5 +193,27 @@ class LocalCacheManager(context: Context) {
             list[i] = list[i].copy(isActive = list[i].gatewayId == gatewayId)
         }
         saveHardwareKits(list)
+    }
+
+    fun cacheActiveBatch(batch: Batch?) {
+        try {
+            if (batch == null) {
+                prefs.edit().remove("cached_active_batch").apply()
+            } else {
+                val json = gson.toJson(batch)
+                prefs.edit().putString("cached_active_batch", json).apply()
+            }
+        } catch (e: Exception) {
+            // handle error gracefully
+        }
+    }
+
+    fun getCachedActiveBatch(): Batch? {
+        val json = prefs.getString("cached_active_batch", null) ?: return null
+        return try {
+            gson.fromJson(json, Batch::class.java)
+        } catch (e: Exception) {
+            null
+        }
     }
 }

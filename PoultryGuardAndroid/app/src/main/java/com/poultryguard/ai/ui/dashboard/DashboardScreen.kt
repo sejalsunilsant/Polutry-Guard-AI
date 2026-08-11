@@ -37,6 +37,10 @@ import com.poultryguard.ai.data.model.SensorReading
 import com.poultryguard.ai.data.model.SensorStatus
 import com.poultryguard.ai.ui.components.*
 import com.poultryguard.ai.ui.theme.*
+import com.poultryguard.ai.data.model.ageDays
+
+import androidx.compose.foundation.BorderStroke
+import com.poultryguard.ai.data.model.Batch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,6 +51,8 @@ fun DashboardScreen(
     currentLanguage: AppLanguage,
     onLanguageChanged: (AppLanguage) -> Unit,
     onNavigateToMortality: () -> Unit,
+    onNavigateToStartBatch: () -> Unit,
+    onNavigateToBatchHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -122,6 +128,84 @@ fun DashboardScreen(
                     }
                 }
                 is DashboardUiState.Success -> {
+                    var showCloseBatchDialog by remember { mutableStateOf(false) }
+
+                    if (showCloseBatchDialog) {
+                        val currentBatch = state.activeBatch
+                        if (currentBatch != null) {
+                            var closeStatus by remember { mutableStateOf(com.poultryguard.ai.data.model.BatchStatus.SOLD) }
+                            var remainingCountStr by remember { mutableStateOf(state.birdCount.toString()) }
+                            var endDateStr by remember { 
+                                val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+                                mutableStateOf(today) 
+                            }
+
+                            AlertDialog(
+                                onDismissRequest = { showCloseBatchDialog = false },
+                                title = { Text(stringResource("confirm_close_batch"), fontWeight = FontWeight.Bold, color = TextDark) },
+                                text = {
+                                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Text("${stringResource("batch_id")}: ${currentBatch.id}", style = Typography.bodyMedium)
+                                        
+                                        Text(stringResource("close_batch") + " " + stringResource("status"), fontWeight = FontWeight.Bold)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                RadioButton(
+                                                    selected = closeStatus == com.poultryguard.ai.data.model.BatchStatus.SOLD,
+                                                    onClick = { closeStatus = com.poultryguard.ai.data.model.BatchStatus.SOLD }
+                                                )
+                                                Text("SOLD", modifier = Modifier.clickable { closeStatus = com.poultryguard.ai.data.model.BatchStatus.SOLD })
+                                            }
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                RadioButton(
+                                                    selected = closeStatus == com.poultryguard.ai.data.model.BatchStatus.CLOSED,
+                                                    onClick = { closeStatus = com.poultryguard.ai.data.model.BatchStatus.CLOSED }
+                                                )
+                                                Text("CLOSED", modifier = Modifier.clickable { closeStatus = com.poultryguard.ai.data.model.BatchStatus.CLOSED })
+                                            }
+                                        }
+
+                                        OutlinedTextField(
+                                            value = remainingCountStr,
+                                            onValueChange = { remainingCountStr = it },
+                                            label = { Text(stringResource("current_count")) },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            keyboardOptions = KeyboardOptions(
+                                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Number
+                                            )
+                                        )
+
+                                        OutlinedTextField(
+                                            value = endDateStr,
+                                            onValueChange = { endDateStr = it },
+                                            label = { Text(stringResource("end_date") + " (yyyy-MM-dd)") },
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                },
+                                confirmButton = {
+                                    Button(
+                                        colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                                        onClick = {
+                                            val count = remainingCountStr.toIntOrNull() ?: currentBatch.currentCount
+                                            viewModel.closeActiveBatch(closeStatus, endDateStr, count) {
+                                                showCloseBatchDialog = false
+                                            }
+                                        }
+                                    ) {
+                                        Text(stringResource("sell_close_action"), color = Color.White)
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showCloseBatchDialog = false }) {
+                                        Text("Cancel")
+                                    }
+                                },
+                                containerColor = CardSurface
+                            )
+                        }
+                    }
+
                     DashboardContent(
                         state = state,
                         farmerName = farmerName,
@@ -131,7 +215,10 @@ fun DashboardScreen(
                         onSimulateSpike = { viewModel.triggerSimulatedSpike(it) },
                         currentLanguage = currentLanguage,
                         onLanguageChanged = onLanguageChanged,
-                        onNavigateToMortality = onNavigateToMortality
+                        onNavigateToMortality = onNavigateToMortality,
+                        onNavigateToStartBatch = onNavigateToStartBatch,
+                        onNavigateToBatchHistory = onNavigateToBatchHistory,
+                        onCloseBatchClick = { showCloseBatchDialog = true }
                     )
 
                     // Sliding Bottom Sheet Chat UI Interface
@@ -174,7 +261,10 @@ fun DashboardContent(
     onSimulateSpike: (String) -> Unit,
     currentLanguage: AppLanguage,
     onLanguageChanged: (AppLanguage) -> Unit,
-    onNavigateToMortality: () -> Unit
+    onNavigateToMortality: () -> Unit,
+    onNavigateToStartBatch: () -> Unit,
+    onNavigateToBatchHistory: () -> Unit,
+    onCloseBatchClick: (Batch) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -359,58 +449,188 @@ fun DashboardContent(
             }
         }
 
-        // Shed & Stock Info Banner
+        // Active Batch Banner or Start Batch Call-To-Action
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = CardSurface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            val batch = state.activeBatch
+            if (batch == null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = CardSurface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    border = BorderStroke(1.dp, GreenPrimary.copy(alpha = 0.2f))
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Home,
-                            contentDescription = "Shed",
-                            tint = GreenPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Info",
+                                tint = AlertOrange,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = stringResource("active_shed"),
+                                text = stringResource("no_active_batch"),
                                 style = Typography.bodyLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = TextDark
                             )
-                            Text(
-                                text = "${stringResource("healthy_stock")}: ${state.birdCount} broilers",
-                                style = Typography.bodyMedium,
-                                color = TextMedium
-                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = onNavigateToStartBatch,
+                                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(stringResource("start_batch"), color = Color.White, fontSize = 13.sp)
+                            }
+                            OutlinedButton(
+                                onClick = onNavigateToBatchHistory,
+                                border = BorderStroke(1.dp, GreenPrimary),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(stringResource("batch_history"), color = GreenPrimary, fontSize = 13.sp)
+                            }
                         }
                     }
-
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(AppBackground)
-                            .clickable { onRefresh() }
-                            .padding(8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Sync Now",
-                            tint = GreenPrimary,
-                            modifier = Modifier.size(20.dp)
+                }
+            } else {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = CardSurface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Home,
+                                    contentDescription = "Shed",
+                                    tint = GreenPrimary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = batch.id,
+                                        style = Typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextDark
+                                    )
+                                    Text(
+                                        text = "${batch.breed} • ${stringResource("days_active")}: ${batch.ageDays}",
+                                        style = Typography.bodyMedium,
+                                        color = TextMedium
+                                    )
+                                }
+                            }
+                            
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(AppBackground)
+                                    .clickable { onRefresh() }
+                                    .padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Sync Now",
+                                    tint = GreenPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Divider(
+                            color = AppBackground,
+                            thickness = 1.dp,
+                            modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = stringResource("initial_count"),
+                                    style = Typography.labelMedium,
+                                    color = TextMedium
+                                )
+                                Text(
+                                    text = batch.initialCount.toString(),
+                                    style = Typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextDark
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = stringResource("current_count"),
+                                    style = Typography.labelMedium,
+                                    color = TextMedium
+                                )
+                                Text(
+                                    text = state.birdCount.toString(),
+                                    style = Typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextDark
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = stringResource("mortality_rate"),
+                                    style = Typography.labelMedium,
+                                    color = TextMedium
+                                )
+                                val mortRate = if (batch.initialCount > 0) {
+                                    ((batch.initialCount - state.birdCount).toFloat() / batch.initialCount * 100).toInt().coerceAtLeast(0)
+                                } else 0
+                                Text(
+                                    text = "$mortRate%",
+                                    style = Typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AlertRed
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = { onCloseBatchClick(batch) },
+                                colors = ButtonDefaults.buttonColors(containerColor = AlertRed),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(stringResource("close_batch"), color = Color.White, fontSize = 13.sp)
+                            }
+                            OutlinedButton(
+                                onClick = onNavigateToBatchHistory,
+                                border = BorderStroke(1.dp, GreenPrimary),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(stringResource("batch_history"), color = GreenPrimary, fontSize = 13.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -501,14 +721,14 @@ fun ChatTerminalContent(
                 ) {
                     Icon(
                         imageVector = Icons.Default.SupportAgent,
-                        contentDescription = "Copilot",
+                        contentDescription = "ChickBot",
                         tint = GreenPrimary
                     )
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text(
-                        text = "AI Farm Copilot",
+                        text = "ChickBot",
                         style = Typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
                         color = TextDark
@@ -637,7 +857,7 @@ fun ChatTerminalContent(
                                     modifier = Modifier.size(12.dp)
                                 )
                                 Text(
-                                    text = "Copilot is analyzing sensors...",
+                                    text = "ChickBot is analyzing sensors...",
                                     fontSize = 11.sp,
                                     color = TextMedium,
                                     fontWeight = FontWeight.Bold
@@ -662,7 +882,7 @@ fun ChatTerminalContent(
             OutlinedTextField(
                 value = textState,
                 onValueChange = { textState = it },
-                placeholder = { Text("Ask Copilot regarding air safety...") },
+                placeholder = { Text("Ask ChickBot regarding air safety...") },
                 shape = RoundedCornerShape(24.dp),
                 singleLine = true,
                 modifier = Modifier.weight(1f),
@@ -782,7 +1002,10 @@ fun DashboardContentPreview() {
             onSimulateSpike = {},
             currentLanguage = AppLanguage.ENGLISH,
             onLanguageChanged = {},
-            onNavigateToMortality = {}
+            onNavigateToMortality = {},
+            onNavigateToStartBatch = {},
+            onNavigateToBatchHistory = {},
+            onCloseBatchClick = {}
         )
     }
 }

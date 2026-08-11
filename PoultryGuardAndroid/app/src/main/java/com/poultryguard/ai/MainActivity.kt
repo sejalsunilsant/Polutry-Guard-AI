@@ -51,9 +51,30 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            val db = remember { com.poultryguard.ai.data.cache.AppDatabase.getDatabase(applicationContext) }
+            val statsDao = remember { db.systemStatsDao() }
             val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(applicationContext) }
+            
             LaunchedEffect(Unit) {
                 vetRepository.populateInitialVetsIfNeeded()
+                if (statsDao.getCount() == 0) {
+                    statsDao.insertOrUpdate(
+                        com.poultryguard.ai.data.model.SystemStats(
+                            id = 1,
+                            totalFarmers = 124,
+                            activeFarmers = 98,
+                            totalFarms = 112,
+                            activeFarms = 88,
+                            totalDevices = 117,
+                            onlineDevices = 89,
+                            offlineDevices = 12,
+                            registeredVets = 15,
+                            activeVets = 11,
+                            openDiseaseAlerts = 7,
+                            pendingSupportRequests = 3
+                        )
+                    )
+                }
             }
             
             var currentLanguage by remember { mutableStateOf(AppLanguage.ENGLISH) }
@@ -99,7 +120,8 @@ class MainActivity : ComponentActivity() {
                                     }
                                     UserRole.ADMIN -> {
                                         AdminDashboardScreen(
-                                            onLogout = { authViewModel.logout() }
+                                            onLogout = { authViewModel.logout() },
+                                            database = db
                                         )
                                     }
                                 }
@@ -284,7 +306,24 @@ class MainActivity : ComponentActivity() {
                                 launchSingleTop = true
                                 restoreState = true
                             }
+                        },
+                        onNavigateToStartBatch = {
+                            navController.navigate("start_batch")
+                        },
+                        onNavigateToBatchHistory = {
+                            navController.navigate("batch_history")
                         }
+                    )
+                }
+                composable("start_batch") {
+                    com.poultryguard.ai.ui.batch.StartBatchScreen(
+                        viewModel = dashboardViewModel,
+                        onNavigateBack = { navController.popBackStack() }
+                    )
+                }
+                composable("batch_history") {
+                    com.poultryguard.ai.ui.batch.BatchHistoryScreen(
+                        onNavigateBack = { navController.popBackStack() }
                     )
                 }
                 composable("mortality") {

@@ -17,5 +17,8 @@ data class MortalityRecord(
     val temperature: Float,
     val humidity: Float,
     val ammoniaLevel: Float,
-    val soundLevel: Float
+    val soundLevel: Float,
+    
+    val batchId: String? = null,
+    val isSynced: Boolean = false
 )
