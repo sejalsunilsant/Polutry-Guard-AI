@@ -1,6 +1,24 @@
 import os
 from supabase import create_client, Client
 
+# Load environment variables manually from .env if not loaded yet (useful for tests and scripts)
+if not os.environ.get("SUPABASE_URL") or not os.environ.get("SUPABASE_KEY"):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    possible_paths = [
+        os.path.abspath(os.path.join(current_dir, "..", "..", ".env")),  # Root directory: Polutry-Guard-AI/.env
+        os.path.abspath(os.path.join(current_dir, "..", ".env")),        # farm_ai_backend/.env
+        os.path.abspath(os.path.join(os.getcwd(), ".env"))                # CWD/.env
+    ]
+    for path in possible_paths:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ[k.strip()] = v.strip()
+            break
+
 url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_KEY")
 
@@ -139,3 +157,51 @@ def update_settings(device_id, settings_dict):
     except Exception as e:
         print(f"[Supabase Error] Failed to update settings for device '{device_id}': {e}")
         return {"status": "error", "message": str(e)}
+
+
+def get_device_thingspeak_config(device_id):
+    """
+    Fetches the ThingSpeak channel ID and read API key for a device.
+    """
+    if supabase is None:
+        return {"status": "fallback", "thingspeak_channel_id": None, "thingspeak_read_api_key": None, "farm_id": None}
+    try:
+        res = supabase.table("devices").select("thingspeak_channel_id", "thingspeak_read_api_key", "farm_id").eq("id", device_id).execute()
+        if res.data and len(res.data) > 0:
+            device = res.data[0]
+            return {
+                "status": "success",
+                "thingspeak_channel_id": device.get("thingspeak_channel_id"),
+                "thingspeak_read_api_key": device.get("thingspeak_read_api_key"),
+                "farm_id": device.get("farm_id")
+            }
+        return {"status": "error", "message": "Device not found"}
+    except Exception as e:
+        print(f"[Supabase Error] Failed to get device config: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+def update_device_thingspeak_config(device_id, farm_id, channel_id, read_api_key):
+    """
+    Updates the ThingSpeak credentials for a device after verifying it belongs to the given farm (or registers it).
+    """
+    if supabase is None:
+        print(f"[Supabase Fallback] Settings updated in local fallback state for device '{device_id}'.")
+        return {"status": "fallback"}
+    try:
+        ensure_device_exists(device_id, farm_id)
+        
+        # Verify ownership
+        verify_res = supabase.table("devices").select("farm_id").eq("id", device_id).execute()
+        if verify_res.data and verify_res.data[0].get("farm_id") != farm_id:
+            return {"status": "error", "message": "Unauthorized: Device belongs to a different farm"}
+            
+        res = supabase.table("devices").update({
+            "thingspeak_channel_id": channel_id,
+            "thingspeak_read_api_key": read_api_key
+        }).eq("id", device_id).execute()
+        return {"status": "success", "data": res.data}
+    except Exception as e:
+        print(f"[Supabase Error] Failed to update device config: {e}")
+        return {"status": "error", "message": str(e)}
+

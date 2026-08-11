@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS devices (
     id VARCHAR(50) PRIMARY KEY, -- e.g. 'esp32_devkitc_a' or MAC address
     farm_id VARCHAR(50) REFERENCES farms(id) ON DELETE CASCADE NOT NULL,
     name VARCHAR(100) NOT NULL,
+    thingspeak_channel_id VARCHAR(50),
+    thingspeak_read_api_key VARCHAR(50),
     created_at TIMESTAMPTZ DEFAULT now() NOT NULL
 );
 
@@ -62,10 +64,14 @@ INSERT INTO farms (id, name)
 VALUES ('default_farm', 'Default Poultry Farm')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO devices (id, farm_id, name)
-VALUES ('default_device', 'default_farm', 'Shed 1 Controller (ESP32-DevKitC)')
+INSERT INTO devices (id, farm_id, name, thingspeak_channel_id, thingspeak_read_api_key)
+VALUES ('default_device', 'default_farm', 'Shed 1 Controller (ESP32-DevKitC)', 'default_channel', 'default_key')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO farm_settings (device_id, vent_temp, heater_temp, lights_on_hour, lights_off_hour, sprinkler_threshold, sms_alerts_enabled, recipient_phone)
 VALUES ('default_device', 26.00, 20.00, 6, 20, 29.50, TRUE, '')
 ON CONFLICT (device_id) DO NOTHING;
+
+-- Migration helpers for existing databases
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS thingspeak_channel_id VARCHAR(50);
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS thingspeak_read_api_key VARCHAR(50);
