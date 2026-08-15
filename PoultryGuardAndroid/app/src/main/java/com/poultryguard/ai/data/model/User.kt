@@ -6,7 +6,9 @@ data class UserProfile(
     val email: String = "",
     val role: UserRole = UserRole.FARMER,
     val farmName: String = "Greenfield Broilers",
-    val joinDate: String = ""
+    val joinDate: String = "",
+    val approvalStatus: String = "APPROVED",
+    val rejectionReason: String? = null
 )
 
 enum class UserRole {

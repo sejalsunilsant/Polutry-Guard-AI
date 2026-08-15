@@ -48,7 +48,7 @@ google-services.json
 .project
 .settings/
 .classpath
-
+*.xml
 # --- OS Specific ---
 Thumbs.db
 desktop.ini

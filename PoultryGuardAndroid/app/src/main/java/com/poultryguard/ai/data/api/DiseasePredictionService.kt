@@ -8,16 +8,16 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
+import retrofit2.http.GET
+import retrofit2.http.Query
 import retrofit2.http.Multipart
 import retrofit2.http.Part
 import java.util.concurrent.TimeUnit
 
 // Request payload for REST AI Disease prediction model
 data class DiseasePredictionRequest(
-    val temperature: Float,
-    val humidity: Float,
-    val ammonia: Float,
-    val soundLevel: Float
+    val deviceId: String,
+    val farmId: String
 )
 
 // Response layout returned by AI REST engine
@@ -45,6 +45,9 @@ enum class DiseaseRiskLevel {
 interface DiseasePredictionApi {
     @POST("api/v1/predict-disease")
     suspend fun predictDisease(@Body request: DiseasePredictionRequest): DiseasePredictionResponse
+
+    @GET("api/v1/predictions/latest")
+    suspend fun getLatestPrediction(@Query("deviceId") deviceId: String): DiseasePredictionResponse
 
     @Multipart
     @POST("api/v1/predict-sound")
@@ -104,27 +107,48 @@ class DiseasePredictionRepository(private val context: Context) {
         )
     }
 
+    suspend fun getLatestPrediction(deviceId: String): Result<DiseasePredictionResponse> {
+        return try {
+            val api = getApi() ?: throw Exception("Retrofit API not initialized.")
+            val response = api.getLatestPrediction(deviceId)
+            Result.success(response)
+        } catch (e: Exception) {
+            Result.success(DiseasePredictionResponse(
+                riskLevel = DiseaseRiskLevel.LOW,
+                confidence = 0.0f,
+                recommendation = "OFFLINE: Latest prediction could not be retrieved from the server."
+            ))
+        }
+    }
+
     suspend fun predictDiseaseRisk(
-        temp: Float,
-        humid: Float,
-        ammonia: Float,
-        sound: Float
+        deviceId: String,
+        farmId: String,
+        temp: Float = 0.0f,
+        humid: Float = 0.0f,
+        ammonia: Float = 0.0f,
+        sound: Float = 0.0f
     ): Result<DiseasePredictionResponse> {
         return try {
             val api = getApi() ?: throw Exception("Retrofit API not initialized.")
             
-            val request = DiseasePredictionRequest(temp, humid, ammonia, sound)
+            val request = DiseasePredictionRequest(deviceId, farmId)
             val response = api.predictDisease(request)
             Result.success(response)
         } catch (e: Exception) {
             // Robust, premium client-side fallback engine to calculate risk locally if REST server is offline
             val computedRisk = evaluateRiskLocally(temp, humid, ammonia, sound)
-            Result.success(computedRisk)
+            val advisoryResponse = DiseasePredictionResponse(
+                riskLevel = computedRisk.riskLevel,
+                confidence = computedRisk.confidence,
+                recommendation = "OFFLINE ADVISORY: Server unreachable. Using local estimate. " + computedRisk.recommendation
+            )
+            Result.success(advisoryResponse)
         }
     }
 
     // Local agricultural AI logic to protect the flock offline
-    private fun evaluateRiskLocally(
+    fun evaluateRiskLocally(
         temp: Float,
         humid: Float,
         ammonia: Float,
@@ -161,6 +185,39 @@ class DiseasePredictionRepository(private val context: Context) {
                     riskLevel = DiseaseRiskLevel.LOW,
                     confidence = 0.95f,
                     recommendation = "LOW RISK: Environment is pristine. Broilers showing healthy, stable telemetry feed."
+                )
+            }
+        }
+    }
+
+    suspend fun simulateUpload(fileName: String): SoundPredictionResponse {
+        kotlinx.coroutines.delay(1000)
+        return when {
+            fileName.contains("cough", ignoreCase = true) || fileName.contains("Sick", ignoreCase = true) -> {
+                SoundPredictionResponse(
+                    prediction = "Sick",
+                    confidence = 0.94f,
+                    probabilities = mapOf("Healthy" to 0.04f, "Sick" to 0.94f, "None" to 0.02f),
+                    status = "success",
+                    message = "Active coughing matched. Possible Infectious Bronchitis (IB) outbreak."
+                )
+            }
+            fileName.contains("Normal", ignoreCase = true) || fileName.contains("Control", ignoreCase = true) -> {
+                SoundPredictionResponse(
+                    prediction = "Healthy",
+                    confidence = 0.98f,
+                    probabilities = mapOf("Healthy" to 0.98f, "Sick" to 0.01f, "None" to 0.01f),
+                    status = "success",
+                    message = "Acoustics normal. Standard vocalization patterns detected."
+                )
+            }
+            else -> {
+                SoundPredictionResponse(
+                    prediction = "Healthy",
+                    confidence = 0.85f,
+                    probabilities = mapOf("Healthy" to 0.85f, "Sick" to 0.05f, "None" to 0.10f),
+                    status = "success",
+                    message = "Ventilation background noise dominant. No anomalous patterns."
                 )
             }
         }

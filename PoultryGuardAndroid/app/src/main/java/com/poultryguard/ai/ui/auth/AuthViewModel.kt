@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.poultryguard.ai.data.model.UserProfile
 import com.poultryguard.ai.data.model.UserRole
 import com.poultryguard.ai.data.repository.AuthRepository
-import com.poultryguard.ai.data.repository.FirebaseAuthRepository
+import com.poultryguard.ai.data.repository.SupabaseAuthRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,11 +19,13 @@ sealed interface AuthUiState {
     object Unauthenticated : AuthUiState
     data class Error(val message: String) : AuthUiState
     object PasswordResetSent : AuthUiState
+    data class PendingApproval(val message: String) : AuthUiState
+    data class RejectedApproval(val reason: String) : AuthUiState
 }
 
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository: AuthRepository = FirebaseAuthRepository(application.applicationContext)
+    private val repository: AuthRepository = SupabaseAuthRepository(application.applicationContext)
 
     private val _uiState = MutableStateFlow<AuthUiState>(AuthUiState.Idle)
     val uiState: StateFlow<AuthUiState> = _uiState.asStateFlow()
@@ -58,29 +60,110 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             val result = repository.login(email, password)
             result.fold(
                 onSuccess = { userProfile ->
-                    _uiState.value = AuthUiState.Authenticated(userProfile)
+                    if (userProfile.approvalStatus == "PENDING_APPROVAL") {
+                        _uiState.value = AuthUiState.PendingApproval("Your account is pending admin approval. Please wait for review.")
+                    } else if (userProfile.approvalStatus == "REJECTED") {
+                        _uiState.value = AuthUiState.RejectedApproval(userProfile.rejectionReason ?: "Rejection details not specified.")
+                    } else {
+                        _uiState.value = AuthUiState.Authenticated(userProfile)
+                    }
                 },
                 onFailure = { error ->
-                    _uiState.value = AuthUiState.Error(error.localizedMessage ?: "Failed logging in.")
+                    val errorMsg = error.localizedMessage ?: "Failed logging in."
+                    if (errorMsg.contains("PENDING_APPROVAL")) {
+                        _uiState.value = AuthUiState.PendingApproval("Your account is pending admin approval. Please wait for review.")
+                    } else if (errorMsg.contains("REJECTED")) {
+                        val reason = errorMsg.substringAfter("Reason: ").substringBefore("||").trim()
+                        _uiState.value = AuthUiState.RejectedApproval(reason.ifBlank { "Rejection details not specified." })
+                    } else {
+                        _uiState.value = AuthUiState.Error(errorMsg.substringBefore("||"))
+                    }
                 }
             )
         }
     }
 
-    fun register(name: String, email: String, password: String, role: UserRole) {
+    fun register(
+        name: String,
+        email: String,
+        password: String,
+        role: UserRole,
+        farmName: String = "",
+        farmLocation: String = "",
+        totalSheds: Int = 4,
+        floorSpaceSqFt: Int = 24000
+    ) {
         if (name.isBlank() || email.isBlank() || password.isBlank()) {
             _uiState.value = AuthUiState.Error("All fields are required.")
             return
         }
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
-            val result = repository.register(name, email, password, role)
+            val result = repository.register(
+                name = name,
+                email = email,
+                password = password,
+                role = role,
+                farmName = farmName,
+                farmLocation = farmLocation,
+                totalSheds = totalSheds,
+                floorSpaceSqFt = floorSpaceSqFt
+            )
             result.fold(
                 onSuccess = { userProfile ->
-                    _uiState.value = AuthUiState.Authenticated(userProfile)
+                    try {
+                        val db = com.poultryguard.ai.data.cache.AppDatabase.getDatabase(getApplication())
+                        if (role == UserRole.FARMER) {
+                            val newFarmer = com.poultryguard.ai.data.model.FarmerProfile(
+                                id = userProfile.uid.ifBlank { "farmer_" + System.currentTimeMillis() },
+                                name = name,
+                                email = email,
+                                phone = "",
+                                accountStatus = "Active",
+                                lastActive = "Just now",
+                                isOnline = true,
+                                farmName = farmName.ifBlank { "Greenfield Broilers" },
+                                farmLocation = farmLocation.ifBlank { "Unspecified Sector" },
+                                totalSheds = totalSheds,
+                                floorSpaceSqFt = floorSpaceSqFt,
+                                deviceId = "Unassigned",
+                                deviceSerial = "PGESP" + (1000..9999).random(),
+                                firmwareVersion = "1.2.0",
+                                activeBatchId = "BATCH-2026-" + (10..99).random() + "A",
+                                activeBatchStartDate = "2026-08-11",
+                                chickAgeDays = 1,
+                                feedConsumedKg = 10.0f,
+                                mortalitiesCount = 0,
+                                openDiseaseAlertsCount = 0
+                            )
+                            db.farmerProfileDao().insert(newFarmer)
+                        } else if (role == UserRole.VETERINARIAN) {
+                            val newVet = com.poultryguard.ai.data.model.Veterinarian(
+                                id = userProfile.uid.ifBlank { "vet_" + System.currentTimeMillis() },
+                                name = name,
+                                specialty = "Avian Medicine",
+                                phone = "",
+                                email = email,
+                                location = "Unspecified District",
+                                photoUrl = "",
+                                availability = "Available",
+                                verificationStatus = "PENDING"
+                            )
+                            db.vetDao().insert(newVet)
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    
+                    if (userProfile.approvalStatus == "PENDING_APPROVAL") {
+                        _uiState.value = AuthUiState.PendingApproval("Your registration was successful. Please wait for an administrator to approve your account.")
+                    } else {
+                        _uiState.value = AuthUiState.Authenticated(userProfile)
+                    }
                 },
                 onFailure = { error ->
-                    _uiState.value = AuthUiState.Error(error.localizedMessage ?: "Registration failed.")
+                    val errorMsg = error.localizedMessage ?: "Registration failed."
+                    _uiState.value = AuthUiState.Error(errorMsg.substringBefore("||"))
                 }
             )
         }

@@ -143,7 +143,7 @@ class ThingSpeakService:
         verifies that it belongs to the given farm (multiple farmers isolation).
         """
         # If running in local fallback state (no Supabase initialized)
-        if supabase is None:
+        if not supabase:
             print(f"[ThingSpeak Ingestion] WARNING: running in local fallback mode. Device '{device_id}' mock authenticated.")
             return {
                 "authenticated": True,

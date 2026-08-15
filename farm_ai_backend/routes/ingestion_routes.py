@@ -83,13 +83,14 @@ def ingest_thingspeak():
         # Feature Engineering (THI, gas stress)
         engineered = engineer_sensor_features(temp, hum, ammonia)
         
-        # 5.1 Run Telemetry Model Inference (XGBoost via ModelManager)
-        sensor_pred = ModelManager.predict_sensor(sensor_features)
-        
         # Determine sound level from feed or default
         sound_level = 50.0
+        
+        # Extract media URLs
+        sound_url = validated_data.get('sound_url')
+        image_url = validated_data.get('image_url')
 
-        # 5.2 Store Telemetry to Supabase first (as per flowchart)
+        # 5.2 Store Telemetry to Supabase
         telemetry_id = None
         try:
             telemetry_res = save_telemetry(
@@ -98,159 +99,28 @@ def ingest_thingspeak():
                 humidity=hum,
                 ammonia=ammonia,
                 sound_level=sound_level,
-                farm_id=farm_id
+                farm_id=farm_id,
+                sound_url=sound_url,
+                image_url=image_url
             )
             if telemetry_res and telemetry_res.get("status") == "success" and telemetry_res.get("data"):
                 telemetry_id = telemetry_res["data"][0].get("id")
         except Exception as se:
             print(f"[Ingestion Route] Database telemetry logging failed: {se}")
-
-        # 5.3 Fetch previous prediction and previous telemetry to check rate limit
-        prev_prediction = get_last_prediction(device_id)
-        telemetry_history = get_last_telemetry(device_id, limit=2)
-        prev_telemetry = None
-        if isinstance(telemetry_history, list) and len(telemetry_history) >= 2:
-            prev_telemetry = telemetry_history[1]
-
-        # 5.4 Parse timestamps and previous readings
-        last_processed_time = None
-        last_capture_time = None
-        prev_temp = None
-        prev_hum = None
-        prev_sound = None
-        
-        from datetime import datetime
-        def parse_timestamp(ts_str):
-            if not ts_str:
-                return None
-            if ts_str.endswith('Z'):
-                ts_str = ts_str[:-1] + '+00:00'
-            try:
-                return datetime.fromisoformat(ts_str)
-            except Exception:
-                return None
-
-        if prev_prediction:
-            last_processed_time = parse_timestamp(prev_prediction.get("created_at"))
-            last_capture_time = last_processed_time
             
-        if prev_telemetry:
-            prev_temp = prev_telemetry.get("temperature")
-            prev_hum = prev_telemetry.get("humidity")
-            prev_sound = prev_telemetry.get("sound_level")
-        
-        # 6. Preprocessing & Inference Layer: Audio (Conditional Ingestion)
-        sound_url = validated_data.get('sound_url')
-        
-        should_process_audio = should_trigger_audio_processing(
-            sound_level=sound_level, 
-            last_processed_time=last_processed_time,
-            force_request=force_audio,
-            sound_threshold=78.0
-        )
-        
-        sound_pred = None
-        audio_metadata = None
-        
-        if sound_url and should_process_audio:
-            try:
-                waveform, sr = preprocess_audio(sound_url)
-                is_valid = is_valid_sound_clip(waveform, sr)
-                
-                # Extract spectrogram from the preprocessed noise-reduced waveform
-                mel = librosa.feature.melspectrogram(y=waveform, sr=sr, n_mels=128)
-                log_mel = librosa.power_to_db(mel)
-                
-                # Pad/trim to 173 width
-                if log_mel.shape[1] < 173:
-                    pad = 173 - log_mel.shape[1]
-                    log_mel = np.pad(log_mel, ((0, 0), (0, pad)))
-                else:
-                    log_mel = log_mel[:, :173]
-                
-                # Run sound inference
-                sound_pred = ModelManager.predict_sound(log_mel)
-                
-                audio_metadata = {
-                    'duration_seconds': float(len(waveform) / sr),
-                    'sample_rate': sr,
-                    'is_valid': is_valid,
-                    'peak_amplitude': float(np.max(np.abs(waveform)))
-                }
-            except Exception as ae:
-                print(f"[Ingestion Route] Audio preprocessing/inference error: {ae}")
-                audio_metadata = {'error': str(ae)}
-        else:
-            audio_metadata = {
-                'processed': False,
-                'status': 'skipped_by_trigger_rules' if sound_url else 'no_url_available'
-            }
-
-        # 7. Preprocessing & Inference Layer: Image (Conditional Ingestion)
-        image_url = validated_data.get('image_url')
-        should_process_image = should_trigger_image_capture(
-            temp=temp,
-            hum=hum,
-            sound=sound_level,
-            prev_temp=prev_temp,
-            prev_hum=prev_hum,
-            prev_sound=prev_sound,
-            last_capture_time=last_capture_time,
-            time_threshold_minutes=10
-        ) or force_image
-        
-        image_pred = None
-        image_metadata = None
-        
-        if image_url and should_process_image:
-            try:
-                img_array = preprocess_image(image_url, target_size=(224, 224))
-                # Run image inference
-                image_pred = ModelManager.predict_image(img_array)
-                
-                image_metadata = {
-                    'shape': list(img_array.shape),
-                    'mean_pixel_value': float(np.mean(img_array))
-                }
-            except Exception as ie:
-                print(f"[Ingestion Route] Image preprocessing/inference error: {ie}")
-                image_metadata = {'error': str(ie)}
-        else:
-            image_metadata = {
-                'processed': False,
-                'status': 'skipped_by_trigger_rules' if image_url else 'no_url_available'
-            }
-            
-        # Execute Decision Fusion and save prediction
-        fused_result = fuse_and_store(
-            device_id=device_id,
-            telemetry_id=telemetry_id,
-            temp=temp,
-            hum=hum,
-            ammonia=ammonia,
-            sound_level=sound_level,
-            sensor_pred=sensor_pred,
-            sound_pred=sound_pred,
-            image_pred=image_pred,
-            farm_id=farm_id
-        )
-        
         # Construct response payload
         response_payload = {
+            'status': 'success',
+            'telemetry_id': telemetry_id,
             'temperature': temp,
             'humidity': hum,
             'ammonia': ammonia,
+            'sound_level': sound_level,
+            'sound_url': sound_url,
+            'image_url': image_url,
             'sensor_features': sensor_features,
             'scaled_sensor_features': scaled_features,
             'engineered_features': engineered,
-            'sensor_prediction': sensor_pred,
-            'audio_processed': audio_metadata.get('processed', True) if audio_metadata else False,
-            'audio_metadata': audio_metadata,
-            'audio_prediction': sound_pred,
-            'image_processed': image_metadata.get('processed', True) if image_metadata else False,
-            'image_metadata': image_metadata,
-            'image_prediction': image_pred,
-            'decision_fusion': fused_result,
             'device_id': device_id,
             'farm_id': farm_id
         }

@@ -116,6 +116,68 @@ FROM batches;
 ALTER TABLE sensor_telemetry ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50) REFERENCES batches(id) ON DELETE SET NULL;
 ALTER TABLE disease_predictions ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50) REFERENCES batches(id) ON DELETE SET NULL;
 
+-- Retention and Event Columns/Tables
+ALTER TABLE public.sensor_telemetry ADD COLUMN IF NOT EXISTS sound_url TEXT;
+ALTER TABLE public.sensor_telemetry ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+CREATE TABLE IF NOT EXISTS public.disease_events (
+    id BIGSERIAL PRIMARY KEY,
+    device_id VARCHAR(50) REFERENCES public.devices(id) ON DELETE CASCADE NOT NULL,
+    batch_id VARCHAR(50) REFERENCES public.batches(id) ON DELETE SET NULL,
+    disease VARCHAR(100) NOT NULL,
+    risk_level VARCHAR(20) NOT NULL,
+    max_confidence NUMERIC(4, 3) NOT NULL,
+    representative_image_url TEXT,
+    representative_sound_url TEXT,
+    start_time TIMESTAMPTZ NOT NULL,
+    end_time TIMESTAMPTZ NOT NULL,
+    prediction_count INTEGER DEFAULT 1 NOT NULL,
+    status VARCHAR(20) DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'RESOLVED')),
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+
+ALTER TABLE public.disease_predictions ADD COLUMN IF NOT EXISTS event_id BIGINT REFERENCES public.disease_events(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS public.daily_telemetry (
+    id BIGSERIAL PRIMARY KEY,
+    device_id VARCHAR(50) REFERENCES public.devices(id) ON DELETE CASCADE NOT NULL,
+    batch_id VARCHAR(50) REFERENCES public.batches(id) ON DELETE SET NULL,
+    date DATE NOT NULL,
+    temp_avg NUMERIC(5, 2) NOT NULL,
+    temp_min NUMERIC(5, 2) NOT NULL,
+    temp_max NUMERIC(5, 2) NOT NULL,
+    hum_avg NUMERIC(5, 2) NOT NULL,
+    hum_min NUMERIC(5, 2) NOT NULL,
+    hum_max NUMERIC(5, 2) NOT NULL,
+    ammonia_avg NUMERIC(5, 2) NOT NULL,
+    ammonia_min NUMERIC(5, 2) NOT NULL,
+    ammonia_max NUMERIC(5, 2) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    CONSTRAINT unique_device_date UNIQUE (device_id, date)
+);
+
+GRANT ALL PRIVILEGES ON TABLE public.disease_events TO anon, authenticated;
+GRANT ALL PRIVILEGES ON TABLE public.daily_telemetry TO anon, authenticated;
+
+ALTER TABLE IF EXISTS public.disease_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.daily_telemetry ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public insert on disease_events" ON public.disease_events;
+DROP POLICY IF EXISTS "Allow public select on disease_events" ON public.disease_events;
+DROP POLICY IF EXISTS "Allow public update on disease_events" ON public.disease_events;
+
+DROP POLICY IF EXISTS "Allow public insert on daily_telemetry" ON public.daily_telemetry;
+DROP POLICY IF EXISTS "Allow public select on daily_telemetry" ON public.daily_telemetry;
+DROP POLICY IF EXISTS "Allow public update on daily_telemetry" ON public.daily_telemetry;
+
+CREATE POLICY "Allow public insert on disease_events" ON public.disease_events FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on disease_events" ON public.disease_events FOR SELECT USING (true);
+CREATE POLICY "Allow public update on disease_events" ON public.disease_events FOR UPDATE USING (true) WITH CHECK (true);
+
+CREATE POLICY "Allow public insert on daily_telemetry" ON public.daily_telemetry FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on daily_telemetry" ON public.daily_telemetry FOR SELECT USING (true);
+CREATE POLICY "Allow public update on daily_telemetry" ON public.daily_telemetry FOR UPDATE USING (true) WITH CHECK (true);
+
 -- 7. Grant Privileges for Supabase API access (anon and authenticated roles)
 GRANT ALL PRIVILEGES ON TABLE public.farms TO anon, authenticated;
 GRANT ALL PRIVILEGES ON TABLE public.devices TO anon, authenticated;
@@ -171,7 +233,9 @@ CREATE TABLE IF NOT EXISTS profiles (
     name VARCHAR(100) NOT NULL,
     email VARCHAR(100) UNIQUE NOT NULL,
     role VARCHAR(50) DEFAULT 'FARMER' REFERENCES roles(name),
-    join_date TIMESTAMPTZ DEFAULT now() NOT NULL
+    join_date TIMESTAMPTZ DEFAULT now() NOT NULL,
+    approval_status VARCHAR(20) DEFAULT 'PENDING_APPROVAL' CHECK (approval_status IN ('PENDING_APPROVAL', 'APPROVED', 'REJECTED')),
+    rejection_reason TEXT
 );
 
 -- Seed initial roles
@@ -405,6 +469,92 @@ GRANT ALL PRIVILEGES ON TABLE public.payments TO anon, authenticated;
 GRANT ALL PRIVILEGES ON TABLE public.subscriptions TO anon, authenticated;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated;
 
+-- Enable Row Level Security (RLS) to secure tables
+ALTER TABLE IF EXISTS public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.farms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.farm_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.veterinarians ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.devices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.sensor_telemetry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.disease_predictions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.farm_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.batches ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if any to prevent conflicts on rebuild
+DROP POLICY IF EXISTS "Allow public insert on profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Allow public select on profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Allow public update on profiles" ON public.profiles;
 
+DROP POLICY IF EXISTS "Allow public insert on farms" ON public.farms;
+DROP POLICY IF EXISTS "Allow public select on farms" ON public.farms;
+DROP POLICY IF EXISTS "Allow public update on farms" ON public.farms;
+
+DROP POLICY IF EXISTS "Allow public insert on farm_members" ON public.farm_members;
+DROP POLICY IF EXISTS "Allow public select on farm_members" ON public.farm_members;
+DROP POLICY IF EXISTS "Allow public update on farm_members" ON public.farm_members;
+
+DROP POLICY IF EXISTS "Allow public insert on veterinarians" ON public.veterinarians;
+DROP POLICY IF EXISTS "Allow public select on veterinarians" ON public.veterinarians;
+DROP POLICY IF EXISTS "Allow public update on veterinarians" ON public.veterinarians;
+
+DROP POLICY IF EXISTS "Allow public insert on devices" ON public.devices;
+DROP POLICY IF EXISTS "Allow public select on devices" ON public.devices;
+DROP POLICY IF EXISTS "Allow public update on devices" ON public.devices;
+
+DROP POLICY IF EXISTS "Allow public insert on sensor_telemetry" ON public.sensor_telemetry;
+DROP POLICY IF EXISTS "Allow public select on sensor_telemetry" ON public.sensor_telemetry;
+
+DROP POLICY IF EXISTS "Allow public insert on disease_predictions" ON public.disease_predictions;
+DROP POLICY IF EXISTS "Allow public select on disease_predictions" ON public.disease_predictions;
+
+DROP POLICY IF EXISTS "Allow public insert on farm_settings" ON public.farm_settings;
+DROP POLICY IF EXISTS "Allow public select on farm_settings" ON public.farm_settings;
+DROP POLICY IF EXISTS "Allow public update on farm_settings" ON public.farm_settings;
+
+DROP POLICY IF EXISTS "Allow public insert on batches" ON public.batches;
+DROP POLICY IF EXISTS "Allow public select on batches" ON public.batches;
+DROP POLICY IF EXISTS "Allow public update on batches" ON public.batches;
+
+-- RLS Policies for Profiles
+CREATE POLICY "Allow public insert on profiles" ON public.profiles FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on profiles" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Allow public update on profiles" ON public.profiles FOR UPDATE USING (true) WITH CHECK (true);
+
+-- RLS Policies for Farms
+CREATE POLICY "Allow public insert on farms" ON public.farms FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on farms" ON public.farms FOR SELECT USING (true);
+CREATE POLICY "Allow public update on farms" ON public.farms FOR UPDATE USING (true) WITH CHECK (true);
+
+-- RLS Policies for Farm Members
+CREATE POLICY "Allow public insert on farm_members" ON public.farm_members FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on farm_members" ON public.farm_members FOR SELECT USING (true);
+CREATE POLICY "Allow public update on farm_members" ON public.farm_members FOR UPDATE USING (true) WITH CHECK (true);
+
+-- RLS Policies for Veterinarians
+CREATE POLICY "Allow public insert on veterinarians" ON public.veterinarians FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on veterinarians" ON public.veterinarians FOR SELECT USING (true);
+CREATE POLICY "Allow public update on veterinarians" ON public.veterinarians FOR UPDATE USING (true) WITH CHECK (true);
+
+-- RLS Policies for Devices
+CREATE POLICY "Allow public insert on devices" ON public.devices FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on devices" ON public.devices FOR SELECT USING (true);
+CREATE POLICY "Allow public update on devices" ON public.devices FOR UPDATE USING (true) WITH CHECK (true);
+
+-- RLS Policies for Sensor Telemetry
+CREATE POLICY "Allow public insert on sensor_telemetry" ON public.sensor_telemetry FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on sensor_telemetry" ON public.sensor_telemetry FOR SELECT USING (true);
+
+-- RLS Policies for Disease Predictions
+CREATE POLICY "Allow public insert on disease_predictions" ON public.disease_predictions FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on disease_predictions" ON public.disease_predictions FOR SELECT USING (true);
+
+-- RLS Policies for Farm Settings
+CREATE POLICY "Allow public insert on farm_settings" ON public.farm_settings FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on farm_settings" ON public.farm_settings FOR SELECT USING (true);
+CREATE POLICY "Allow public update on farm_settings" ON public.farm_settings FOR UPDATE USING (true) WITH CHECK (true);
+
+-- RLS Policies for Batches
+CREATE POLICY "Allow public insert on batches" ON public.batches FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on batches" ON public.batches FOR SELECT USING (true);
+CREATE POLICY "Allow public update on batches" ON public.batches FOR UPDATE USING (true) WITH CHECK (true);
 

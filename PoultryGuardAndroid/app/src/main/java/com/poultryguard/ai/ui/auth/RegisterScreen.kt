@@ -13,6 +13,10 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Work
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,6 +48,12 @@ fun RegisterScreen(
     var confirmPassword by remember { mutableStateOf("") }
     var selectedRole by remember { mutableStateOf(UserRole.FARMER) }
     var dropdownExpanded by remember { mutableStateOf(false) }
+
+    // Farm Information fields for Farmers
+    var farmName by remember { mutableStateOf("") }
+    var farmLocation by remember { mutableStateOf("") }
+    var totalSheds by remember { mutableStateOf("4") }
+    var floorSpace by remember { mutableStateOf("24000") }
 
     var validationError by remember { mutableStateOf<String?>(null) }
     val scrollState = rememberScrollState()
@@ -185,6 +195,64 @@ fun RegisterScreen(
                             }
                         }
 
+                        // Dynamic Farm Information Inputs for Farmers
+                        AnimatedVisibility(visible = selectedRole == UserRole.FARMER) {
+                            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                OutlinedTextField(
+                                    value = farmName,
+                                    onValueChange = { farmName = it },
+                                    label = { Text("Farm Name") },
+                                    leadingIcon = { Icon(Icons.Default.Home, contentDescription = "Farm Name", tint = GreenPrimary) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = GreenPrimary,
+                                        focusedLabelColor = GreenPrimary
+                                    )
+                                )
+                                OutlinedTextField(
+                                    value = farmLocation,
+                                    onValueChange = { farmLocation = it },
+                                    label = { Text("Farm Location") },
+                                    leadingIcon = { Icon(Icons.Default.Place, contentDescription = "Location", tint = GreenPrimary) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = GreenPrimary,
+                                        focusedLabelColor = GreenPrimary
+                                    )
+                                )
+                                OutlinedTextField(
+                                    value = totalSheds,
+                                    onValueChange = { totalSheds = it },
+                                    label = { Text("Total Sheds / Barns") },
+                                    leadingIcon = { Icon(Icons.Default.Apps, contentDescription = "Sheds", tint = GreenPrimary) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = GreenPrimary,
+                                        focusedLabelColor = GreenPrimary
+                                    )
+                                )
+                                OutlinedTextField(
+                                    value = floorSpace,
+                                    onValueChange = { floorSpace = it },
+                                    label = { Text("Floor Space (Sq. Ft.)") },
+                                    leadingIcon = { Icon(Icons.Default.Crop, contentDescription = "Floor Space", tint = GreenPrimary) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = GreenPrimary,
+                                        focusedLabelColor = GreenPrimary
+                                    )
+                                )
+                            }
+                        }
+
                         // Password
                         OutlinedTextField(
                             value = password,
@@ -240,6 +308,9 @@ fun RegisterScreen(
                                     name.isBlank() || email.isBlank() || password.isBlank() || confirmPassword.isBlank() -> {
                                         validationError = "Please fill in all requested fields."
                                     }
+                                    selectedRole == UserRole.FARMER && (farmName.isBlank() || farmLocation.isBlank()) -> {
+                                        validationError = "Please fill in all Farm details."
+                                    }
                                     password.length < 6 -> {
                                         validationError = "Password must be at least 6 characters."
                                     }
@@ -247,7 +318,25 @@ fun RegisterScreen(
                                         validationError = "Passwords do not match."
                                     }
                                     else -> {
-                                        viewModel.register(name, email, password, selectedRole)
+                                        if (selectedRole == UserRole.FARMER) {
+                                            viewModel.register(
+                                                name = name,
+                                                email = email,
+                                                password = password,
+                                                role = selectedRole,
+                                                farmName = farmName,
+                                                farmLocation = farmLocation,
+                                                totalSheds = totalSheds.toIntOrNull() ?: 4,
+                                                floorSpaceSqFt = floorSpace.toIntOrNull() ?: 24000
+                                            )
+                                        } else {
+                                            viewModel.register(
+                                                name = name,
+                                                email = email,
+                                                password = password,
+                                                role = selectedRole
+                                            )
+                                        }
                                     }
                                 }
                             },
