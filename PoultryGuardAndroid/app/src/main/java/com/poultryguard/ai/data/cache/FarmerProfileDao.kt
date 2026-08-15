@@ -23,4 +23,10 @@ interface FarmerProfileDao {
 
     @Query("SELECT COUNT(*) FROM farmer_profiles")
     suspend fun getCount(): Int
+
+    @Query("SELECT * FROM farmer_profiles WHERE email = :email LIMIT 1")
+    suspend fun getFarmerByEmail(email: String): FarmerProfile?
+
+    @Query("SELECT * FROM farmer_profiles WHERE id = :id LIMIT 1")
+    suspend fun getFarmerById(id: String): FarmerProfile?
 }

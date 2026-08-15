@@ -6,18 +6,21 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.Surface
 import androidx.compose.animation.*
-
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -37,10 +40,7 @@ import com.poultryguard.ai.ui.dashboard.DashboardScreen
 import com.poultryguard.ai.ui.dashboard.DashboardViewModel
 import com.poultryguard.ai.ui.profile.ProfileScreen
 import com.poultryguard.ai.ui.profile.HardwareConfigScreen
-import com.poultryguard.ai.ui.theme.AppLanguage
-import com.poultryguard.ai.ui.theme.LocalAppLanguage
-import com.poultryguard.ai.ui.theme.PoultryGuardTheme
-import com.poultryguard.ai.ui.theme.stringResource
+import com.poultryguard.ai.ui.theme.*
 import com.poultryguard.ai.ui.vet.VetDashboardScreen
 import androidx.compose.material.icons.filled.HeartBroken
 import androidx.compose.ui.Alignment
@@ -279,6 +279,18 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             }
+                            is AuthUiState.PendingApproval -> {
+                                PendingApprovalScreen(
+                                    message = state.message,
+                                    onBackToLogin = { authViewModel.resetState() }
+                                )
+                            }
+                            is AuthUiState.RejectedApproval -> {
+                                RejectedApprovalScreen(
+                                    reason = state.reason,
+                                    onBackToLogin = { authViewModel.resetState() }
+                                )
+                            }
                             else -> {
                                 AuthNavigationContainer(authViewModel)
                             }
@@ -508,6 +520,125 @@ class MainActivity : ComponentActivity() {
                             navController.popBackStack()
                         }
                     )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun PendingApprovalScreen(message: String, onBackToLogin: () -> Unit) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(AppBackground).padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = CardSurface),
+                border = BorderStroke(1.dp, DividerColor)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AccessTime,
+                        contentDescription = "Pending Approval",
+                        tint = AlertOrange,
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Registration Pending Approval",
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextDark,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = message,
+                        style = Typography.bodyMedium,
+                        color = TextMedium,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = onBackToLogin,
+                        colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Text("Back to Login", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun RejectedApprovalScreen(reason: String, onBackToLogin: () -> Unit) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(AppBackground).padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = CardSurface),
+                border = BorderStroke(1.dp, DividerColor)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Cancel,
+                        contentDescription = "Rejected",
+                        tint = AlertRed,
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Registration Rejected",
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextDark,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Your request to register has been rejected by the administrator.",
+                        style = Typography.bodyMedium,
+                        color = TextMedium,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(AlertRed.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                            .border(1.dp, AlertRed.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = "Reason: $reason",
+                            style = Typography.bodyMedium,
+                            color = AlertRed,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = onBackToLogin,
+                        colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Text("Back to Login", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }

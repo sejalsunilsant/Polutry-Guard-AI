@@ -765,6 +765,11 @@ fun AdminDashboardScreen(
                                 onClick = { peopleSubTab = 1 },
                                 text = { Text("Veterinarians", fontWeight = FontWeight.Bold) }
                             )
+                            Tab(
+                                selected = peopleSubTab == 2,
+                                onClick = { peopleSubTab = 2 },
+                                text = { Text("Requests", fontWeight = FontWeight.Bold) }
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1091,6 +1096,13 @@ fun AdminDashboardScreen(
                                         }
                                     }
                                 }
+                            }
+                            2 -> {
+                                PendingFarmerRequestsSubScreen(
+                                    authRepository = remember { com.poultryguard.ai.data.repository.SupabaseAuthRepository(context) },
+                                    coroutineScope = coroutineScope,
+                                    context = context
+                                )
                             }
                         }
                     }
@@ -1555,15 +1567,16 @@ fun AdminDashboardScreen(
             )
         }
 
-        // Assign to Farmer Dialog Layout
         activeAssignKit?.let { kit ->
             AssignKitDialog(
                 kit = kit,
+                farmers = farmersListState,
                 onDismiss = { activeAssignKit = null },
-                onAssign = { farmer, farm ->
+                onAssign = { id, farmer, farm ->
                     val updatedList = kitsList.map { k ->
                         if (k.kitId == kit.kitId) {
                             k.copy(
+                                farmerId = id,
                                 farmerName = farmer,
                                 farmName = farm,
                                 lifecycleStatus = "Active"
@@ -1980,7 +1993,7 @@ fun AddKitDialog(
     var ammoniaSerial by remember { mutableStateOf("NH3-" + nextSuggestedId.takeLast(2)) }
     var soundSerial by remember { mutableStateOf("MIC-" + nextSuggestedId.takeLast(2)) }
     var cameraSerial by remember { mutableStateOf("CAM-" + nextSuggestedId.takeLast(2)) }
-
+    // Form fields
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -2087,7 +2100,8 @@ fun AddKitDialog(
                         cameraSensorId = cameraSerial,
                         farmerName = "",
                         farmName = "",
-                        lastCommunication = "Offline (Warehouse Inventory)"
+                        lastCommunication = "Offline (Warehouse Inventory)",
+                        farmerId = ""
                     )
                     onAddKit(kit)
                 }
@@ -2143,11 +2157,18 @@ fun SensorCheckRow(
 @Composable
 fun AssignKitDialog(
     kit: HardwareKit,
+    farmers: List<com.poultryguard.ai.data.model.FarmerProfile>,
     onDismiss: () -> Unit,
-    onAssign: (String, String) -> Unit
+    onAssign: (String, String, String) -> Unit
 ) {
-    var farmerName by remember { mutableStateOf("") }
-    var farmName by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
+    var selectedFarmer by remember { mutableStateOf<com.poultryguard.ai.data.model.FarmerProfile?>(null) }
+
+    LaunchedEffect(farmers) {
+        if (farmers.isNotEmpty() && selectedFarmer == null) {
+            selectedFarmer = farmers.firstOrNull()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2155,37 +2176,83 @@ fun AssignKitDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.AssignmentInd, contentDescription = "Assign", tint = GreenPrimary)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Assign Kit to Farm", fontWeight = FontWeight.Bold)
+                Text("Assign Kit to Farm", fontWeight = FontWeight.Bold, color = TextDark)
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Target Kit: ${kit.kitId}", style = Typography.bodyMedium, color = TextMedium)
 
-                OutlinedTextField(
-                    value = farmerName,
-                    onValueChange = { farmerName = it },
-                    label = { Text("Farmer Full Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = farmName,
-                    onValueChange = { farmName = it },
-                    label = { Text("Farm / Shed Identifier") },
-                    singleLine = true,
-                    placeholder = { Text("e.g. Shed #4 Broilers") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Text("Select Farmer", style = Typography.titleSmall, fontWeight = FontWeight.Bold, color = TextDark)
+                
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextDark)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = selectedFarmer?.let { "${it.name} (${it.farmName})" } ?: "Select Farmer Profile...",
+                                maxLines = 1,
+                                color = TextDark
+                            )
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = GreenPrimary)
+                        }
+                    }
+                    
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        farmers.forEach { farmer ->
+                            DropdownMenuItem(
+                                text = { Text("${farmer.name} - ${farmer.farmName} (${farmer.farmLocation})", color = TextDark) },
+                                onClick = {
+                                    selectedFarmer = farmer
+                                    expanded = false
+                                }
+                            )
+                        }
+                        if (farmers.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("No registered farmers found", color = AlertRed) },
+                                onClick = { expanded = false },
+                                enabled = false
+                            )
+                        }
+                    }
+                }
+                
+                selectedFarmer?.let { farmer ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = AppBackground),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Farmer Name: ${farmer.name}", style = Typography.bodyMedium, color = TextDark, fontWeight = FontWeight.Bold)
+                            Text("Email: ${farmer.email}", style = Typography.bodySmall, color = TextMedium)
+                            Text("Farm Name: ${farmer.farmName}", style = Typography.bodyMedium, color = TextDark)
+                            Text("Location: ${farmer.farmLocation}", style = Typography.bodySmall, color = TextMedium)
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             Button(
                 colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                enabled = selectedFarmer != null,
                 onClick = {
-                    if (farmerName.isBlank() || farmName.isBlank()) return@Button
-                    onAssign(farmerName, farmName)
+                    val farmer = selectedFarmer ?: return@Button
+                    onAssign(farmer.id, farmer.name, farmer.farmName)
                 }
             ) {
                 Text("Complete Assignment", color = Color.White)
@@ -2891,4 +2958,255 @@ fun VetDetailDialog(
         },
         containerColor = CardSurface
     )
+}
+
+@Composable
+fun PendingFarmerRequestsSubScreen(
+    authRepository: com.poultryguard.ai.data.repository.AuthRepository,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    context: android.content.Context
+) {
+    var pendingFarmers by remember { mutableStateOf<List<com.poultryguard.ai.data.api.PendingFarmerDto>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    
+    var selectedRequest by remember { mutableStateOf<com.poultryguard.ai.data.api.PendingFarmerDto?>(null) }
+    var showRejectDialog by remember { mutableStateOf(false) }
+    var rejectionReasonText by remember { mutableStateOf("") }
+    
+    fun loadRequests() {
+        isLoading = true
+        errorMessage = null
+        coroutineScope.launch {
+            val res = authRepository.getPendingFarmers()
+            res.fold(
+                onSuccess = { list ->
+                    pendingFarmers = list
+                    isLoading = false
+                },
+                onFailure = { err ->
+                    errorMessage = err.localizedMessage ?: "Failed loading requests"
+                    isLoading = false
+                }
+            )
+        }
+    }
+    
+    LaunchedEffect(Unit) {
+        loadRequests()
+    }
+    
+    Column(modifier = Modifier.fillMaxSize().padding(top = 8.dp)) {
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = GreenPrimary)
+            }
+        } else if (errorMessage != null) {
+            Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(errorMessage!!, color = AlertRed, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(onClick = { loadRequests() }, colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary)) {
+                        Text("Retry", color = Color.White)
+                    }
+                }
+            }
+        } else if (pendingFarmers.isEmpty()) {
+            Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                Text("No pending farmer registration requests.", color = TextMedium, textAlign = TextAlign.Center)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 80.dp)
+            ) {
+                items(pendingFarmers) { request ->
+                    val farmName = request.farmMembers?.firstOrNull()?.farms?.name ?: "Unspecified Farm"
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable { selectedRequest = request },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = CardSurface),
+                        border = BorderStroke(1.dp, DividerColor)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(request.name, fontWeight = FontWeight.Bold, color = TextDark, fontSize = 16.sp)
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(request.email, color = TextMedium, fontSize = 13.sp)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(AlertOrange.copy(alpha = 0.1f))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Pending", color = AlertOrange, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Divider(color = DividerColor, thickness = 1.dp)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Column {
+                                    Text("Farm Name", style = Typography.labelMedium, color = TextMedium)
+                                    Text(farmName, fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("Joined", style = Typography.labelMedium, color = TextMedium)
+                                    Text(request.joinDate.substringBefore("T"), fontWeight = FontWeight.SemiBold, color = TextDark, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Details Sheet Dialog
+    selectedRequest?.let { request ->
+        val farmName = request.farmMembers?.firstOrNull()?.farms?.name ?: "Unspecified Farm"
+        AlertDialog(
+            onDismissRequest = { selectedRequest = null },
+            title = {
+                Text(
+                    text = "Review Registration Request",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Farmer Information",
+                        fontWeight = FontWeight.Bold,
+                        color = GreenPrimary,
+                        fontSize = 14.sp
+                    )
+                    Column {
+                        Text("Name: ${request.name}", color = TextDark, fontSize = 14.sp)
+                        Text("Email: ${request.email}", color = TextDark, fontSize = 14.sp)
+                        Text("Registered: ${request.joinDate}", color = TextMedium, fontSize = 12.sp)
+                    }
+                    Divider(color = DividerColor)
+                    Text(
+                        text = "Farm Information",
+                        fontWeight = FontWeight.Bold,
+                        color = GreenPrimary,
+                        fontSize = 14.sp
+                    )
+                    Column {
+                        Text("Farm Name: $farmName", color = TextDark, fontSize = 14.sp)
+                        Text("Verification Status: PENDING_APPROVAL", color = TextDark, fontSize = 14.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            val res = authRepository.reviewFarmer(request.id, "APPROVE")
+                            res.fold(
+                                onSuccess = {
+                                    Toast.makeText(context, "Farmer Approved Successfully!", Toast.LENGTH_SHORT).show()
+                                    selectedRequest = null
+                                    loadRequests()
+                                },
+                                onFailure = { err ->
+                                    Toast.makeText(context, "Approval failed: ${err.message}", Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Approve", color = Color.White)
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { selectedRequest = null }) {
+                        Text("Cancel", color = TextMedium)
+                    }
+                    Button(
+                        onClick = {
+                            showRejectDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AlertRed),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Reject", color = Color.White)
+                    }
+                }
+            }
+        )
+    }
+    
+    // Rejection Reason Prompt Dialog
+    if (showRejectDialog && selectedRequest != null) {
+        val request = selectedRequest!!
+        AlertDialog(
+            onDismissRequest = { showRejectDialog = false },
+            title = {
+                Text("Enter Rejection Reason", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                OutlinedTextField(
+                    value = rejectionReasonText,
+                    onValueChange = { rejectionReasonText = it },
+                    placeholder = { Text("e.g. Invalid farm address, unverified documents...") },
+                    modifier = Modifier.fillMaxWidth().height(100.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AlertRed,
+                        focusedLabelColor = AlertRed
+                    )
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (rejectionReasonText.isBlank()) {
+                            Toast.makeText(context, "Rejection reason cannot be empty", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        coroutineScope.launch {
+                            val res = authRepository.reviewFarmer(request.id, "REJECT", rejectionReasonText)
+                            res.fold(
+                                onSuccess = {
+                                    Toast.makeText(context, "Farmer Registration Rejected", Toast.LENGTH_SHORT).show()
+                                    showRejectDialog = false
+                                    selectedRequest = null
+                                    rejectionReasonText = ""
+                                    loadRequests()
+                                },
+                                onFailure = { err ->
+                                    Toast.makeText(context, "Rejection failed: ${err.message}", Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AlertRed),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Submit Rejection", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRejectDialog = false }) {
+                    Text("Cancel", color = TextMedium)
+                }
+            }
+        )
+    }
 }

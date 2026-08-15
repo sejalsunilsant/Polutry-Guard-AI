@@ -41,8 +41,8 @@ sealed interface DashboardUiState {
         val activeBatch: Batch? = null,
         val diseasePrediction: DiseasePredictionResponse = DiseasePredictionResponse(
             riskLevel = DiseaseRiskLevel.LOW,
-            confidence = 0.95f,
-            recommendation = "LOW RISK: Environment is pristine. Broilers showing healthy stable telemetry feed."
+            confidence = 0.0f,
+            recommendation = ""
         ),
         val isMqttConnected: Boolean = false
     ) : DashboardUiState
@@ -78,10 +78,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val batchRepository = BatchRepository(application.applicationContext)
     private var mqttManager: MqttManager? = null
 
-    private var currentTemp = 24.2f
-    private var currentHumid = 61.5f
-    private var currentAmmonia = 12.0f
-    private var currentSound = 54.0f
+    private var currentTemp = 0.0f
+    private var currentHumid = 0.0f
+    private var currentAmmonia = 0.0f
+    private var currentSound = 0.0f
     
     private var activeBatch: Batch? = null
     private var unsyncedMortalities = 0
@@ -89,8 +89,8 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private var activeMqttConnection = false
     private var currentPrediction = DiseasePredictionResponse(
         riskLevel = DiseaseRiskLevel.LOW,
-        confidence = 0.95f,
-        recommendation = "LOW RISK: Environment is pristine."
+        confidence = 0.0f,
+        recommendation = ""
     )
 
     init {
@@ -100,10 +100,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun loadCachedData() {
         val cachedTelemetry = cacheManager.getCachedTelemetry()
-        currentTemp = cachedTelemetry["temp"] ?: 24.2f
-        currentHumid = cachedTelemetry["humid"] ?: 61.5f
-        currentAmmonia = cachedTelemetry["ammonia"] ?: 12.0f
-        currentSound = cachedTelemetry["sound"] ?: 54.0f
+        currentTemp = cachedTelemetry["temp"] ?: 0.0f
+        currentHumid = cachedTelemetry["humid"] ?: 0.0f
+        currentAmmonia = cachedTelemetry["ammonia"] ?: 0.0f
+        currentSound = cachedTelemetry["sound"] ?: 0.0f
         
         activeBatch = cacheManager.getCachedActiveBatch()
     }
@@ -125,6 +125,36 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             delay(1000)
             setupMqtt()
             updateDashboardState()
+            loadLatestPrediction()
+        }
+    }
+
+    fun loadLatestPrediction() {
+        viewModelScope.launch {
+            val result = diseaseRepository.getLatestPrediction(
+                deviceId = "default_device"
+            )
+            result.onSuccess { prediction ->
+                currentPrediction = prediction
+                updateDashboardState()
+            }
+        }
+    }
+
+    fun triggerPrediction() {
+        viewModelScope.launch {
+            val result = diseaseRepository.predictDiseaseRisk(
+                deviceId = "default_device",
+                farmId = "default_farm",
+                temp = currentTemp,
+                humid = currentHumid,
+                ammonia = currentAmmonia,
+                sound = currentSound
+            )
+            result.onSuccess { prediction ->
+                currentPrediction = prediction
+                updateDashboardState()
+            }
         }
     }
 
@@ -151,16 +181,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         }
         
         cacheManager.cacheTelemetry(currentTemp, currentHumid, currentAmmonia, currentSound)
-        
-        viewModelScope.launch {
-            val predResult = diseaseRepository.predictDiseaseRisk(
-                currentTemp, currentHumid, currentAmmonia, currentSound
-            )
-            predResult.onSuccess { prediction ->
-                currentPrediction = prediction
-            }
-            updateDashboardState()
-        }
+        updateDashboardState()
     }
 
     fun submitMortalityLog(deathCount: Int, symptoms: List<String>) {
@@ -251,6 +272,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             delay(800)
             _isRefreshing.value = false
             updateDashboardState()
+            loadLatestPrediction()
         }
     }
 
@@ -383,12 +405,9 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }
             
-            val predResult = diseaseRepository.predictDiseaseRisk(
+            currentPrediction = diseaseRepository.evaluateRiskLocally(
                 currentTemp, currentHumid, currentAmmonia, currentSound
             )
-            predResult.onSuccess { prediction ->
-                currentPrediction = prediction
-            }
             updateDashboardState()
         }
     }

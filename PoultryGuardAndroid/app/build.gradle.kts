@@ -80,10 +80,7 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
 
-    // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:32.8.0"))
-    implementation("com.google.firebase:firebase-auth")
-    implementation("com.google.firebase:firebase-firestore")
+
 
     // Network & REST API Integration
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
@@ -117,4 +114,7 @@ dependencies {
 
     // Coroutines for background tasks
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // ZXing for QR Code generation
+    implementation("com.google.zxing:core:3.5.3")
 }

@@ -24,6 +24,7 @@ data class HardwareKit(
     val hasSoundSensor: Boolean = true,
     val hasCameraSensor: Boolean = false,
     val cameraSensorId: String = "CAM-001",
-    val lastCommunication: String = "Never"
+    val lastCommunication: String = "Never",
+    val farmerId: String = ""
 )
 

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.poultryguard.ai.data.cache.LocalCacheManager
 import com.poultryguard.ai.data.model.HardwareKit
+import android.widget.Toast
 import com.poultryguard.ai.data.model.UserProfile
 import com.poultryguard.ai.ui.theme.*
 import kotlinx.coroutines.delay
@@ -59,8 +60,7 @@ fun HardwareConfigScreen(
     var wifiPassword by remember { mutableStateOf("") }
     
     // Scanning simulation states
-    var isQrScanning by remember { mutableStateOf(false) }
-    var qrLaserPosition by remember { mutableStateOf(0f) }
+    var selectedKit by remember { mutableStateOf<HardwareKit?>(null) }
     var bleScanningState by remember { mutableStateOf("starting") } // starting, scanning, found
     var wifiUploadingState by remember { mutableStateOf(0) } // 0 = idle, 1..5 = steps
     
@@ -83,7 +83,6 @@ fun HardwareConfigScreen(
                     IconButton(onClick = {
                         if (currentStep > 0 && currentStep != 4) {
                             currentStep = 0
-                            isQrScanning = false
                         } else {
                             onNavigateBack()
                         }
@@ -109,7 +108,9 @@ fun HardwareConfigScreen(
         ) {
             when (currentStep) {
                 0 -> KitsListView(
-                    kits = kitsList,
+                    kits = kitsList.filter {
+                        (it.farmerId == userProfile.uid || (it.farmerId.isEmpty() && it.farmerName.trim().lowercase() == farmerName.trim().lowercase())) && it.isProvisioned
+                    },
                     onProvisionClick = { currentStep = 1 },
                     onDeleteClick = { kit ->
                         cacheManager.deleteHardwareKit(kit.gatewayId)
@@ -120,24 +121,24 @@ fun HardwareConfigScreen(
                         kitsList = cacheManager.getHardwareKits()
                     }
                 )
-                1 -> ClaimKeyView(
-                    kitId = kitId,
-                    onKitIdChange = { kitId = it },
-                    isQrScanning = isQrScanning,
-                    qrLaserPosition = qrLaserPosition,
-                    onQrScanClick = {
-                        isQrScanning = true
-                    },
-                    onQrScanningFinished = {
-                        kitId = "ESP32-A102"
-                        isQrScanning = false
-                    },
-                    onNext = {
-                        if (kitId.isNotBlank()) {
-                            currentStep = 2
-                        }
+                1 -> {
+                    val assignedKits = kitsList.filter {
+                        (it.farmerId == userProfile.uid || (it.farmerId.isEmpty() && it.farmerName.trim().lowercase() == farmerName.trim().lowercase())) && !it.isProvisioned
                     }
-                )
+                    AssignedKitSelectionView(
+                        assignedKits = assignedKits,
+                        selectedKit = selectedKit,
+                        onSelectKit = { kit ->
+                            selectedKit = kit
+                            kitId = kit.kitId
+                        },
+                        onNext = {
+                            if (kitId.isNotBlank()) {
+                                currentStep = 2
+                            }
+                        }
+                    )
+                }
                 2 -> BleRadarView(
                     kitId = kitId,
                     scanningState = bleScanningState,
@@ -170,25 +171,38 @@ fun HardwareConfigScreen(
                     gatewayId = kitId,
                     ssid = wifiSsid,
                     onComplete = {
-                        val newKit = HardwareKit(
+                        // Locate the existing registered kit to update it in-place and retain fields set by Admin
+                        val existingKits = cacheManager.getHardwareKits()
+                        val matchedKit = existingKits.find { 
+                            it.kitId.trim().lowercase() == kitId.trim().lowercase() || 
+                            it.gatewayId.trim().lowercase() == kitId.trim().lowercase() 
+                        }
+                        
+                        val updatedKit = matchedKit?.copy(
+                            isProvisioned = true,
+                            ssid = wifiSsid,
+                            isActive = kitsList.none { it.isActive && it.farmerName == farmerName },
+                            provisionedAt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date()),
+                            lifecycleStatus = "Active"
+                        ) ?: HardwareKit(
                             farmerName = farmerName,
                             farmName = farmName,
                             gatewayId = kitId,
-                            tempSensorId = "TMP-001",
-                            humidSensorId = "HUM-001",
-                            ammoniaSensorId = "NH3-001",
-                            soundSensorId = "MIC-001",
                             ssid = wifiSsid,
                             isProvisioned = true,
-                            isActive = kitsList.isEmpty(), // Make active by default if it's the first kit
-                            provisionedAt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
+                            isActive = kitsList.isEmpty(),
+                            provisionedAt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date()),
+                            lifecycleStatus = "Active",
+                            farmerId = userProfile.uid
                         )
-                        cacheManager.addHardwareKit(newKit)
+                        
+                        cacheManager.addHardwareKit(updatedKit)
                         kitsList = cacheManager.getHardwareKits()
                         
                         // Reset forms
                         kitId = ""
                         wifiPassword = ""
+                        selectedKit = null
                         bleScanningState = "starting"
                         wifiUploadingState = 0
                         currentStep = 0
@@ -512,25 +526,12 @@ fun SensorTreeLine(prefix: String, sensorId: String, name: String) {
 // 2. CLAIM KEY VIEW (STEP 1)
 // ==========================================
 @Composable
-fun ClaimKeyView(
-    kitId: String,
-    onKitIdChange: (String) -> Unit,
-    isQrScanning: Boolean,
-    qrLaserPosition: Float,
-    onQrScanClick: () -> Unit,
-    onQrScanningFinished: () -> Unit,
+fun AssignedKitSelectionView(
+    assignedKits: List<HardwareKit>,
+    selectedKit: HardwareKit?,
+    onSelectKit: (HardwareKit) -> Unit,
     onNext: () -> Unit
 ) {
-    var animateLaser by remember { mutableStateOf(false) }
-    
-    // Simulate laser animation during QR scan
-    LaunchedEffect(isQrScanning) {
-        if (isQrScanning) {
-            delay(1800) // Simulated scan delay
-            onQrScanningFinished()
-        }
-    }
-
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -539,13 +540,13 @@ fun ClaimKeyView(
         item {
             Column(modifier = Modifier.padding(vertical = 8.dp)) {
                 Text(
-                    text = "Hardware Claim",
+                    text = "Select Assigned Kit",
                     style = Typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = TextDark
                 )
                 Text(
-                    text = "Claim ownership of your ESP32 controller gateway by inputting its unique key.",
+                    text = "Select one of the device kits assigned to you by the farm administrator to begin configuration.",
                     style = Typography.bodyMedium,
                     color = TextMedium,
                     modifier = Modifier.padding(top = 4.dp)
@@ -553,156 +554,135 @@ fun ClaimKeyView(
             }
         }
 
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = CardSurface)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "Option A: Manual Verification",
-                        style = Typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = TextDark
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    OutlinedTextField(
-                        value = kitId,
-                        onValueChange = onKitIdChange,
-                        label = { Text("Enter Kit ID / Claim Key") },
-                        placeholder = { Text("e.g. ESP32-A102") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = GreenPrimary,
-                            unfocusedBorderColor = DividerColor,
-                            focusedLabelColor = GreenPrimary
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        TextButton(onClick = { onKitIdChange("ESP32-A102") }) {
-                            Text("Use Demo ID (ESP32-A102)", color = GreenPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
-
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = CardSurface)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+        if (assignedKits.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = CardSurface)
                 ) {
-                    Text(
-                        text = "Option B: Scan Cryptographic QR Code",
-                        style = Typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = TextDark,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    if (isQrScanning) {
-                        val infiniteTransition = rememberInfiniteTransition()
-                        val animLaserPosition by infiniteTransition.animateFloat(
-                            initialValue = 0f,
-                            targetValue = 160f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(1200, easing = LinearEasing),
-                                repeatMode = RepeatMode.Reverse
-                            )
-                        )
-                        
-                        // Scanner UI Overlay Box
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Box(
                             modifier = Modifier
-                                .size(180.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color.Black)
-                                .border(3.dp, GreenPrimary, RoundedCornerShape(16.dp)),
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(AlertOrange.copy(alpha = 0.1f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.QrCodeScanner,
-                                contentDescription = "Camera feed mock",
-                                tint = Color.White.copy(alpha = 0.3f),
-                                modifier = Modifier.size(72.dp)
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "No Kits",
+                                tint = AlertOrange,
+                                modifier = Modifier.size(32.dp)
                             )
-                            
-                            // Laser horizontal bar
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(2.dp)
-                                    .offset(y = (animLaserPosition - 80).dp)
-                                    .background(Color(0xFF4CAF50))
-                            )
-                            
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(8.dp),
-                                contentAlignment = Alignment.TopCenter
-                            ) {
-                                Text(
-                                    text = "SCANNING SECURE LABEL",
-                                    color = Color(0xFF4CAF50),
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "Hold camera up to QR sticker on the ESP32 box...",
+                            text = "No Assigned Kits Found",
+                            style = Typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = TextDark
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "There are no unprovisioned hardware kits assigned to your farmer profile at this moment.\n\nPlease contact your farm administrator to register and assign a kit to you.",
                             style = Typography.bodyMedium,
                             color = TextMedium,
                             textAlign = TextAlign.Center
                         )
-                    } else {
-                        Button(
-                            onClick = onQrScanClick,
-                            colors = ButtonDefaults.buttonColors(containerColor = BlueSecondary),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
+                    }
+                }
+            }
+        } else {
+            items(assignedKits) { kit ->
+                val isSelected = selectedKit?.kitId == kit.kitId
+                val borderStroke = if (isSelected) BorderStroke(2.dp, GreenPrimary) else BorderStroke(1.dp, DividerColor)
+                val cardBg = if (isSelected) GreenPrimary.copy(alpha = 0.04f) else CardSurface
+                
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectKit(kit) },
+                    shape = RoundedCornerShape(16.dp),
+                    border = borderStroke,
+                    colors = CardDefaults.cardColors(containerColor = cardBg)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.QrCodeScanner, contentDescription = "Scan")
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Launch Camera Scanner", fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Memory,
+                                    contentDescription = "IoT Device",
+                                    tint = if (isSelected) GreenPrimary else TextMedium,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = kit.kitId,
+                                    style = Typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextDark
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Selected",
+                                    tint = GreenPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        
+                        Divider(color = DividerColor, thickness = 1.dp, modifier = Modifier.padding(vertical = 10.dp))
+                        
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                Text("Device ID: ", style = Typography.bodySmall, color = TextMedium, modifier = Modifier.width(100.dp))
+                                Text(kit.gatewayId, style = Typography.bodySmall, color = TextDark, fontWeight = FontWeight.Medium)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                Text("Serial No: ", style = Typography.bodySmall, color = TextMedium, modifier = Modifier.width(100.dp))
+                                Text(kit.serialNumber, style = Typography.bodySmall, color = TextDark)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                Text("Firmware: ", style = Typography.bodySmall, color = TextMedium, modifier = Modifier.width(100.dp))
+                                Text(kit.firmwareVersion, style = Typography.bodySmall, color = TextDark)
+                            }
                         }
                     }
                 }
             }
-        }
 
-        item {
-            Button(
-                onClick = onNext,
-                enabled = kitId.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = GreenPrimary,
-                    disabledContainerColor = DividerColor
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-            ) {
-                Text("Locate Gateway via Bluetooth", color = Color.White, fontWeight = FontWeight.Bold)
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = onNext,
+                    enabled = selectedKit != null,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = GreenPrimary,
+                        disabledContainerColor = DividerColor
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                ) {
+                    Text(
+                        text = "Proceed to BLE pairing",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
