@@ -42,21 +42,25 @@ class LocalCacheManager(context: Context) {
     }
 
     // Cache Telemetry Readings
-    fun cacheTelemetry(temp: Float, humid: Float, ammonia: Float, sound: Float) {
+    fun cacheTelemetry(temp: Float?, humid: Float?, ammonia: Float?, sound: Float?) {
         prefs.edit().apply {
-            putFloat(KEY_LAST_TEMP, temp)
-            putFloat(KEY_LAST_HUMID, humid)
-            putFloat(KEY_LAST_AMMONIA, ammonia)
-            putFloat(KEY_LAST_SOUND, sound)
+            if (temp != null) putFloat(KEY_LAST_TEMP, temp) else remove(KEY_LAST_TEMP)
+            if (humid != null) putFloat(KEY_LAST_HUMID, humid) else remove(KEY_LAST_HUMID)
+            if (ammonia != null) putFloat(KEY_LAST_AMMONIA, ammonia) else remove(KEY_LAST_AMMONIA)
+            if (sound != null) putFloat(KEY_LAST_SOUND, sound) else remove(KEY_LAST_SOUND)
         }.apply()
     }
 
-    fun getCachedTelemetry(): Map<String, Float> {
+    fun getCachedTelemetry(): Map<String, Float?> {
+        val temp = if (prefs.contains(KEY_LAST_TEMP)) prefs.getFloat(KEY_LAST_TEMP, 0f) else null
+        val humid = if (prefs.contains(KEY_LAST_HUMID)) prefs.getFloat(KEY_LAST_HUMID, 0f) else null
+        val ammonia = if (prefs.contains(KEY_LAST_AMMONIA)) prefs.getFloat(KEY_LAST_AMMONIA, 0f) else null
+        val sound = if (prefs.contains(KEY_LAST_SOUND)) prefs.getFloat(KEY_LAST_SOUND, 0f) else null
         return mapOf(
-            "temp" to prefs.getFloat(KEY_LAST_TEMP, 24.2f),
-            "humid" to prefs.getFloat(KEY_LAST_HUMID, 61.5f),
-            "ammonia" to prefs.getFloat(KEY_LAST_AMMONIA, 12.0f),
-            "sound" to prefs.getFloat(KEY_LAST_SOUND, 54.0f)
+            "temp" to temp,
+            "humid" to humid,
+            "ammonia" to ammonia,
+            "sound" to sound
         )
     }
 
@@ -75,50 +79,7 @@ class LocalCacheManager(context: Context) {
     }
 
     fun getCachedFarmEvents(): List<FarmEvent> {
-        val json = prefs.getString("cached_farm_events", null)
-        if (json == null) {
-            val mocks = listOf(
-                FarmEvent(
-                    dateStr = "2026-05-25",
-                    timeStr = "09:00",
-                    type = com.poultryguard.ai.data.model.FarmEventType.CLEANING,
-                    title = "Routine Shed Cleaning",
-                    notes = "Litter turned and completely dried. Fans checked."
-                ),
-                FarmEvent(
-                    dateStr = "2026-05-28",
-                    timeStr = "10:30",
-                    type = com.poultryguard.ai.data.model.FarmEventType.VACCINE,
-                    title = "Gumboro Vaccine Administered",
-                    notes = "Applied via drinking water lines."
-                ),
-                FarmEvent(
-                    dateStr = "2026-06-01",
-                    timeStr = "08:00",
-                    type = com.poultryguard.ai.data.model.FarmEventType.VACCINE,
-                    title = "Newcastle LaSota Booster",
-                    notes = "Aerosol spray application in Shed #4."
-                ),
-                FarmEvent(
-                    dateStr = "2026-06-03",
-                    timeStr = "14:00",
-                    type = com.poultryguard.ai.data.model.FarmEventType.FEEDING,
-                    title = "High-Protein Starter Blend",
-                    notes = "Feeding sweep audit completed for Shed #4."
-                ),
-                FarmEvent(
-                    dateStr = "2026-06-05",
-                    timeStr = "11:00",
-                    type = com.poultryguard.ai.data.model.FarmEventType.VENTILATION,
-                    title = "Exhaust Fan Speed Testing",
-                    notes = "Verify fans at 100% max velocity.",
-                    isScheduled = true,
-                    recurrence = com.poultryguard.ai.data.model.RecurrenceType.WEEKLY
-                )
-            )
-            cacheFarmEvents(mocks)
-            return mocks
-        }
+        val json = prefs.getString("cached_farm_events", null) ?: return emptyList()
         return try {
             val type = object : com.google.gson.reflect.TypeToken<List<FarmEvent>>() {}.type
             gson.fromJson(json, type)

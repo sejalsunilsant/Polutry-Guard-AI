@@ -52,8 +52,8 @@ fun RegisterScreen(
     // Farm Information fields for Farmers
     var farmName by remember { mutableStateOf("") }
     var farmLocation by remember { mutableStateOf("") }
-    var totalSheds by remember { mutableStateOf("4") }
-    var floorSpace by remember { mutableStateOf("24000") }
+    var totalSheds by remember { mutableStateOf("") }
+    var floorSpace by remember { mutableStateOf("") }
 
     var validationError by remember { mutableStateOf<String?>(null) }
     val scrollState = rememberScrollState()
@@ -326,8 +326,8 @@ fun RegisterScreen(
                                                 role = selectedRole,
                                                 farmName = farmName,
                                                 farmLocation = farmLocation,
-                                                totalSheds = totalSheds.toIntOrNull() ?: 4,
-                                                floorSpaceSqFt = floorSpace.toIntOrNull() ?: 24000
+                                                totalSheds = totalSheds.toIntOrNull() ?: 0,
+                                                floorSpaceSqFt = floorSpace.toIntOrNull() ?: 0
                                             )
                                         } else {
                                             viewModel.register(

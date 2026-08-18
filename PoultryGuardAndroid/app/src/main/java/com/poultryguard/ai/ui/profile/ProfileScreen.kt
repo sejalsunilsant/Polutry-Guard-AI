@@ -28,7 +28,9 @@ import android.net.Uri
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import com.poultryguard.ai.data.model.UserProfile
+import com.poultryguard.ai.data.model.FarmerProfile
 import com.poultryguard.ai.data.cache.LocalCacheManager
+import com.poultryguard.ai.data.cache.AppDatabase
 import com.poultryguard.ai.ui.theme.*
 
 @Composable
@@ -39,6 +41,27 @@ fun ProfileScreen(
     onNavigateToHardwareConfig: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val db = remember { AppDatabase.getDatabase(context.applicationContext) }
+    var farmerProfile by remember { mutableStateOf<FarmerProfile?>(null) }
+    var vetProfile by remember { mutableStateOf<com.poultryguard.ai.data.model.Veterinarian?>(null) }
+    
+    LaunchedEffect(userProfile.email) {
+        if (userProfile.email.isNotBlank()) {
+            if (userProfile.role == com.poultryguard.ai.data.model.UserRole.FARMER) {
+                farmerProfile = db.farmerProfileDao().getFarmerByEmail(userProfile.email)
+            } else if (userProfile.role == com.poultryguard.ai.data.model.UserRole.VETERINARIAN) {
+                vetProfile = db.vetDao().getVetByEmail(userProfile.email)
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        try {
+            vetRepository.syncVeterinarians()
+        } catch (e: Exception) {
+            // Ignore offline network errors
+        }
+    }
     val veterinariansState = vetRepository.getVeterinariansFlow().collectAsState(initial = emptyList())
     val veterinarians = veterinariansState.value
     Scaffold(
@@ -81,8 +104,22 @@ fun ProfileScreen(
                         style = Typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )
+                    val subtitleText = when (userProfile.role) {
+                        com.poultryguard.ai.data.model.UserRole.FARMER -> {
+                            "Primary Owner & Operator • ${farmerProfile?.farmName?.ifBlank { "No Farm Assigned" } ?: "No Farm Assigned"}"
+                        }
+                        com.poultryguard.ai.data.model.UserRole.VETERINARIAN -> {
+                            "${vetProfile?.specialty?.ifBlank { "Veterinary Practitioner" } ?: "Veterinary Practitioner"} • ${vetProfile?.location?.ifBlank { "Unspecified" } ?: "Unspecified"}"
+                        }
+                        com.poultryguard.ai.data.model.UserRole.ADMIN -> {
+                            "System Administrator • Site Headquarters"
+                        }
+                        com.poultryguard.ai.data.model.UserRole.SUPER_ADMIN -> {
+                            "Super Administrator • Central Command"
+                        }
+                    }
                     Text(
-                        text = "Primary Owner & Operator • Shed 1-6",
+                        text = subtitleText,
                         style = Typography.bodyMedium,
                         color = TextMedium
                     )
@@ -110,16 +147,26 @@ fun ProfileScreen(
                             value = userProfile.email
                         )
                         Divider(color = DividerColor, thickness = 1.dp, modifier = Modifier.padding(vertical = 10.dp))
+                        val phoneVal = when (userProfile.role) {
+                            com.poultryguard.ai.data.model.UserRole.FARMER -> farmerProfile?.phone?.ifBlank { "Not configured" } ?: "Not configured"
+                            com.poultryguard.ai.data.model.UserRole.VETERINARIAN -> vetProfile?.phone?.ifBlank { "Not configured" } ?: "Not configured"
+                            else -> "N/A"
+                        }
+                        val locationVal = when (userProfile.role) {
+                            com.poultryguard.ai.data.model.UserRole.FARMER -> farmerProfile?.farmLocation?.ifBlank { "Not configured" } ?: "Not configured"
+                            com.poultryguard.ai.data.model.UserRole.VETERINARIAN -> vetProfile?.location?.ifBlank { "Not configured" } ?: "Not configured"
+                            else -> "HQ Command Centre"
+                        }
                         ContactItem(
                             icon = Icons.Default.Phone,
                             label = "SMS Alarm Number",
-                            value = "+1 (555) 382-7492"
+                            value = phoneVal
                         )
                         Divider(color = DividerColor, thickness = 1.dp, modifier = Modifier.padding(vertical = 10.dp))
                         ContactItem(
                             icon = Icons.Default.LocationOn,
                             label = "Geographical Region",
-                            value = "Midwest Broiler Belt, Sect-4"
+                            value = locationVal
                         )
                     }
                 }

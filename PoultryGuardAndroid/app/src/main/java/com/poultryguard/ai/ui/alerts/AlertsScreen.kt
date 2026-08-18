@@ -47,6 +47,7 @@ import com.poultryguard.ai.data.model.FarmEvent
 import com.poultryguard.ai.data.model.FarmEventType
 import com.poultryguard.ai.data.model.RecurrenceType
 import com.poultryguard.ai.data.model.MortalityRecord
+import com.poultryguard.ai.data.model.ageDays
 import com.poultryguard.ai.data.repository.MortalityRepository
 import com.poultryguard.ai.data.cache.CalendarReminderManager
 import java.text.SimpleDateFormat
@@ -57,6 +58,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlertsScreen(
+    farmerName: String,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -74,9 +76,19 @@ fun AlertsScreen(
 
     val mortalityRepository = remember { MortalityRepository(context.applicationContext) }
     var mortalityRecords by remember { mutableStateOf<List<MortalityRecord>>(emptyList()) }
+    
+    val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(context.applicationContext) }
+    var veterinarians by remember { mutableStateOf<List<com.poultryguard.ai.data.model.Veterinarian>>(emptyList()) }
 
     LaunchedEffect(Unit) {
         cachedEvents = cacheManager.getCachedFarmEvents()
+    }
+    LaunchedEffect(Unit) {
+        vetRepository.getVeterinariansFlow().collect { vets ->
+            veterinarians = vets
+        }
+    }
+    LaunchedEffect(Unit) {
         mortalityRepository.getAllRecordsFlow().collect { records ->
             mortalityRecords = records
         }
@@ -104,43 +116,66 @@ fun AlertsScreen(
     var showReportDialog by remember { mutableStateOf(false) }
 
     fun generateBiosecurityReport(loggedDeaths: Int) {
-        val totalBirds = 12500
-        val survivalCount = totalBirds - loggedDeaths
-        val survivalRate = (survivalCount.toFloat() / totalBirds) * 100
+        val activeBatch = (uiState as? DashboardUiState.Success)?.activeBatch
+        val totalBirds = activeBatch?.initialCount ?: 0
+        val survivalCount = (totalBirds - loggedDeaths).coerceAtLeast(0)
+        val survivalRate = if (totalBirds > 0) (survivalCount.toFloat() / totalBirds) * 100 else 0.0f
 
-        val reportContent = """
-            # POULTRY GUARD AI - BIOSECURITY REPORT
-            =========================================
-            Generated Timestamp: 2026-05-31
-            Target Location: Shed #4 (Broilers - Day 18)
-            flock Owner: Farmer Joe Patterson
-            
-            ## 📊 Telemetry & Mortality Audit
-            -----------------------------------------
-            - Initial Flock Stock: $totalBirds broilers
-            - Logged Mortalities: $loggedDeaths deaths
-            - Active Surviving Flock: $survivalCount broilers
-            - Survival Rate Indicator: ${"%.2f%%".format(survivalRate)}
-            
-            ## 🌡️ Daily Environment Analytics
-            -----------------------------------------
-            - 1D Weekly Health Median: ${"%.2f%%".format(healthRates.average())}
-            - Peak Temperature Swings: 31.0 °C
-            - Peak Ammonia Gas Exposure: 25.5 ppm (WARNING threshold exceeded)
-            
-            ## 🧠 AI Diagnostic Insights & Action Plan
-            -----------------------------------------
-            [WARNING] Ammonia levels correlated with Temperature Swings indicate a critical biosecurity quadrant risk. High temperature limits broiler sweat dispersion and damp litter releases toxic gases.
-            
-            ### 🛠️ MANDATORY ACTION CHECKS:
-            1. **Ventilation:** Engage Exhaust Fans at 100% speed to displace ammonia gas build-up.
-            2. **litter Care:** Treat wet barn spaces immediately to check microbial gas decay.
-            3. **Cooling:** Enable Broiler Misters to combat thermal stress.
-            4. **Veterinarian Sweep:** Auto-notified Dr. Sarah Jenkins due to cumulative symptom logs.
-            
-            =========================================
-            [Poultry Guard AI Cryptographic Security Audit OK]
-        """.trimIndent()
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val dynamicShedName = activeBatch?.let { "${it.breed} - Day ${it.ageDays}" } ?: "No Active Batch"
+        
+        val successState = uiState as? DashboardUiState.Success
+        val currentTemp = successState?.sensorReadings?.find { it.id == "temperature" }?.value ?: 0f
+        val currentAmmonia = successState?.sensorReadings?.find { it.id == "ammonia" }?.value ?: 0f
+        
+        val assignedVet = veterinarians.firstOrNull { it.verificationStatus == "VERIFIED" }
+        val vetName = assignedVet?.name ?: "an assigned veterinarian"
+
+        val reportContent = if (activeBatch == null) {
+            """
+                # POULTRY GUARD AI - BIOSECURITY REPORT
+                =========================================
+                Generated Timestamp: $todayStr
+                flock Owner: Farmer $farmerName
+                
+                No active batch detected in the database. Please start a batch to generate environment reports.
+                =========================================
+            """.trimIndent()
+        } else {
+            """
+                # POULTRY GUARD AI - BIOSECURITY REPORT
+                =========================================
+                Generated Timestamp: $todayStr
+                Target Location: $dynamicShedName
+                flock Owner: Farmer $farmerName
+                
+                ## 📊 Telemetry & Mortality Audit
+                -----------------------------------------
+                - Initial Flock Stock: $totalBirds broilers
+                - Logged Mortalities: $loggedDeaths deaths
+                - Active Surviving Flock: $survivalCount broilers
+                - Survival Rate Indicator: ${"%.2f%%".format(survivalRate)}
+                
+                ## 🌡️ Daily Environment Analytics
+                -----------------------------------------
+                - 1D Weekly Health Median: ${if (survivalRate > 0) "%.2f%%".format(survivalRate) else "N/A"}
+                - Peak Temperature Swings: ${"%.1f".format(currentTemp)} °C
+                - Peak Ammonia Gas Exposure: ${"%.1f".format(currentAmmonia)} ppm ${if (currentAmmonia >= 16f) "(WARNING threshold exceeded)" else ""}
+                
+                ## 🧠 AI Diagnostic Insights & Action Plan
+                -----------------------------------------
+                [WARNING] Ammonia levels correlated with Temperature Swings indicate a critical biosecurity quadrant risk. High temperature limits broiler sweat dispersion and damp litter releases toxic gases.
+                
+                ### 🛠️ MANDATORY ACTION CHECKS:
+                1. **Ventilation:** Engage Exhaust Fans at 100% speed to displace ammonia gas build-up.
+                2. **litter Care:** Treat wet barn spaces immediately to check microbial gas decay.
+                3. **Cooling:** Enable Broiler Misters to combat thermal stress.
+                4. **Veterinarian Sweep:** Auto-notified $vetName due to cumulative symptom logs.
+                
+                =========================================
+                [Poultry Guard AI Cryptographic Security Audit OK]
+            """.trimIndent()
+        }
 
         // Persist/Export report inside workspace local directory (zero cost)
         try {
@@ -272,10 +307,6 @@ fun AlertsScreen(
                 )
             }
 
-            // Health Assistant Section
-            item {
-                HealthAssistantSection()
-            }
 
             // Interactive Farm Calendar Section
             item {
@@ -685,10 +716,13 @@ fun AlertsScreen(
 
             // Dynamic Diagnostic Summary Cards
             item {
-                val loggedDeaths = cacheManager.getCachedMortalities()
-                val total = 12500
-                val survival = total - loggedDeaths
-                val survivalRate = (survival.toFloat() / total) * 100
+                val activeBatch = (uiState as? DashboardUiState.Success)?.activeBatch
+                val total = activeBatch?.initialCount ?: 0
+                val loggedDeaths = activeBatch?.let { batch ->
+                    mortalityRecords.filter { it.batchId == batch.id }.sumOf { it.deathCount }
+                } ?: 0
+                val survival = (total - loggedDeaths).coerceAtLeast(0)
+                val survivalRate = if (total > 0) (survival.toFloat() / total) * 100 else 0.0f
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -727,12 +761,13 @@ fun AlertsScreen(
                                 )
                             }
                             Column {
-                                Text(text = "Peak Ammonia", fontSize = 11.sp, color = TextMedium)
+                                val currentAmmoniaVal = (uiState as? DashboardUiState.Success)?.sensorReadings?.find { it.id == "ammonia" }?.value ?: 0f
+                                Text(text = "Current Ammonia", fontSize = 11.sp, color = TextMedium)
                                 Text(
-                                    text = "25.5 ppm",
+                                    text = "${"%.1f".format(currentAmmoniaVal)} ppm",
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = AlertOrange
+                                    color = if (currentAmmoniaVal >= 25f) AlertRed else if (currentAmmoniaVal >= 16f) AlertOrange else GreenPrimary
                                 )
                             }
                         }
@@ -742,7 +777,10 @@ fun AlertsScreen(
 
             // Generate report card action
             item {
-                val loggedDeaths = cacheManager.getCachedMortalities()
+                val activeBatch = (uiState as? DashboardUiState.Success)?.activeBatch
+                val loggedDeaths = activeBatch?.let { batch ->
+                    mortalityRecords.filter { it.batchId == batch.id }.sumOf { it.deathCount }
+                } ?: 0
                 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -1098,139 +1136,3 @@ private fun isSameDayOfMonth(startStr: String, targetStr: String): Boolean {
     }
 }
 
-@Composable
-fun HealthAssistantSection() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = CardSurface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Header
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(GreenPrimary.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SupportAgent,
-                        contentDescription = "AI Health Assistant",
-                        tint = GreenPrimary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "Health Assistant",
-                    style = Typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = TextDark
-                )
-            }
-
-            // Disease Risk Alert Card (orange-tinted warning card)
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, AlertOrange.copy(alpha = 0.4f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "Warning",
-                        tint = AlertOrange,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "AI Risk Alert: Medium Coccidiosis Probability",
-                            style = Typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = AlertOrange
-                        )
-                        Text(
-                            text = "Correlated Ammonia gas swings (19.0 ppm) and temperature spikes (27.8°C) recorded in Shed #4 indicate wet litter risk.",
-                            style = Typography.labelMedium,
-                            color = TextDark
-                        )
-                    }
-                }
-            }
-
-            // Insights details
-            Text(
-                text = "Historical Insights & Analysis",
-                style = Typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextDark,
-                modifier = Modifier.padding(bottom = 6.dp)
-            )
-            Text(
-                text = "Over the last 30 days, your overall survival rate is high (99.91%). However, acoustic panic density indicators recorded a 5% raise in bird stress chirps during afternoon temperature peaks. Air quality indexes remained within safe margins except for transient ammonia spikes.",
-                style = Typography.bodyMedium,
-                color = TextMedium,
-                modifier = Modifier.padding(bottom = 16.dp),
-                lineHeight = 18.sp
-            )
-
-            // Recommendations
-            Text(
-                text = "Preventive Recommendations",
-                style = Typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextDark,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-
-            val recommendations = listOf(
-                "Engage exhaust fans at 100% capacity during heat hours (12:00 - 15:00) to clear transient ammonia gas.",
-                "Apply dry absorbent agents (e.g. agricultural lime/drying powder) to damp litter zones under the watering lines.",
-                "Distribute electrolyte-enhanced water booster packs to support birds during heat stress peaks."
-            )
-
-            recommendations.forEachIndexed { index, rec ->
-                Row(
-                    modifier = Modifier.padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .padding(top = 2.dp)
-                            .size(16.dp)
-                            .clip(CircleShape)
-                            .background(GreenPrimary),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "${index + 1}",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = rec,
-                        style = Typography.bodyMedium,
-                        color = TextDark,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
-    }
-}

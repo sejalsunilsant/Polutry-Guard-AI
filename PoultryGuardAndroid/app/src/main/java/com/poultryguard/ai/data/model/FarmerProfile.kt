@@ -23,8 +23,8 @@ data class FarmerProfile(
     val deviceId: String, // e.g. "ESP32-001"
     val deviceSerial: String,
     val firmwareVersion: String,
-    val signalStrengthRssi: String = "-58 dBm",
-    val batteryPercentage: String = "94%",
+    val signalStrengthRssi: String = "",
+    val batteryPercentage: String = "",
     
     // Active Batch Information
     val activeBatchId: String,
@@ -35,21 +35,21 @@ data class FarmerProfile(
     val isBatchActive: Boolean = true,
     
     // Sensor status details
-    val tempSensorStatus: String = "Normal (24.2°C)",
-    val humidSensorStatus: String = "Normal (61.5%)",
-    val ammoniaSensorStatus: String = "Optimal (12 ppm)",
-    val soundSensorStatus: String = "Healthy (54 dB)",
+    val tempSensorStatus: String = "",
+    val humidSensorStatus: String = "",
+    val ammoniaSensorStatus: String = "",
+    val soundSensorStatus: String = "",
     
     // Disease Alerts
     val openDiseaseAlertsCount: Int,
-    val latestAlertText: String = "No critical alerts",
+    val latestAlertText: String = "",
     
     // Veterinarian Consultations
-    val assignedVetName: String = "Dr. Sarah Jenkins",
-    val lastConsultationDate: String = "2026-08-01",
-    val consultationNotes: String = "Flock showing excellent weight gain. No respiratory snicks reported.",
+    val assignedVetName: String = "",
+    val lastConsultationDate: String = "",
+    val consultationNotes: String = "",
     
     // Activity History
-    val lastLoginTime: String = "Today, 10:45 AM",
-    val lastActionDesc: String = "Configured automatic ventilation trigger for Shed 4"
+    val lastLoginTime: String = "",
+    val lastActionDesc: String = ""
 )

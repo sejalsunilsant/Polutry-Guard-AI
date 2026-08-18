@@ -80,6 +80,25 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS thingspeak_read_api_key VARCHAR(50)
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS kit_id VARCHAR(50);
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
+-- Kit pre-registration extended columns (device_kits table)
+ALTER TABLE device_kits ADD COLUMN IF NOT EXISTS name VARCHAR(100);
+ALTER TABLE device_kits ADD COLUMN IF NOT EXISTS kit_id VARCHAR(50);
+ALTER TABLE device_kits ADD COLUMN IF NOT EXISTS serial_number VARCHAR(100);
+ALTER TABLE device_kits ADD COLUMN IF NOT EXISTS firmware_version VARCHAR(50);
+ALTER TABLE device_kits ADD COLUMN IF NOT EXISTS thingspeak_channel_id VARCHAR(50);
+ALTER TABLE device_kits ADD COLUMN IF NOT EXISTS thingspeak_read_api_key VARCHAR(50);
+ALTER TABLE device_kits ADD COLUMN IF NOT EXISTS thingspeak_write_api_key VARCHAR(100);
+
+-- RLS policies for device_kits (required for anon key inserts from Flask backend)
+ALTER TABLE IF EXISTS public.device_kits ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public insert on device_kits" ON public.device_kits;
+DROP POLICY IF EXISTS "Allow public select on device_kits" ON public.device_kits;
+DROP POLICY IF EXISTS "Allow public update on device_kits" ON public.device_kits;
+CREATE POLICY "Allow public insert on device_kits" ON public.device_kits FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on device_kits" ON public.device_kits FOR SELECT USING (true);
+CREATE POLICY "Allow public update on device_kits" ON public.device_kits FOR UPDATE USING (true) WITH CHECK (true);
+GRANT ALL PRIVILEGES ON TABLE public.device_kits TO anon, authenticated;
+
 -- 6. Batches Table
 CREATE TABLE IF NOT EXISTS batches (
     id VARCHAR(50) PRIMARY KEY, -- e.g. 'BATCH-001'

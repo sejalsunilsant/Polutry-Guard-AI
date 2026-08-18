@@ -29,11 +29,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.poultryguard.ai.data.cache.LocalCacheManager
+import com.poultryguard.ai.data.cache.AppDatabase
 import com.poultryguard.ai.data.model.HardwareKit
+import com.poultryguard.ai.data.model.FarmerProfile
 import android.widget.Toast
 import com.poultryguard.ai.data.model.UserProfile
 import com.poultryguard.ai.ui.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,6 +50,17 @@ fun HardwareConfigScreen(
 ) {
     val context = LocalContext.current
     val cacheManager = remember { LocalCacheManager(context) }
+    val db = remember { AppDatabase.getDatabase(context) }
+    val farmerDao = remember { db.farmerProfileDao() }
+    val coroutineScope = rememberCoroutineScope()
+    
+    var localFarmerProfile by remember { mutableStateOf<FarmerProfile?>(null) }
+    
+    LaunchedEffect(userProfile.email) {
+        if (userProfile.email.isNotBlank()) {
+            localFarmerProfile = farmerDao.getFarmerByEmail(userProfile.email)
+        }
+    }
     
     // Loaded kits from SharedPreferences
     var kitsList by remember { mutableStateOf(cacheManager.getHardwareKits()) }
@@ -56,7 +70,7 @@ fun HardwareConfigScreen(
     
     // Onboarding Form States
     var kitId by remember { mutableStateOf("") }
-    var wifiSsid by remember { mutableStateOf("Raj_Poultry_Secure_5G") }
+    var wifiSsid by remember { mutableStateOf("") }
     var wifiPassword by remember { mutableStateOf("") }
     
     // Scanning simulation states
@@ -65,8 +79,8 @@ fun HardwareConfigScreen(
     var wifiUploadingState by remember { mutableStateOf(0) } // 0 = idle, 1..5 = steps
     
     // Seed initial farmer-specific configuration suggestions
-    val farmerName = userProfile.name.ifBlank { "Raj" }
-    val farmName = "${farmerName} Poultry Farm"
+    val farmerName = localFarmerProfile?.name ?: userProfile.name
+    val farmName = localFarmerProfile?.farmName ?: userProfile.farmName
 
     Scaffold(
         topBar = {
@@ -109,7 +123,10 @@ fun HardwareConfigScreen(
             when (currentStep) {
                 0 -> KitsListView(
                     kits = kitsList.filter {
-                        (it.farmerId == userProfile.uid || (it.farmerId.isEmpty() && it.farmerName.trim().lowercase() == farmerName.trim().lowercase())) && it.isProvisioned
+                        val matchesFarmer = it.farmerId == userProfile.uid || 
+                                (localFarmerProfile != null && it.farmerId.trim().lowercase() == localFarmerProfile?.id?.trim()?.lowercase()) || 
+                                (it.farmerId.isEmpty() && it.farmerName.trim().lowercase() == farmerName.trim().lowercase())
+                        matchesFarmer && it.isProvisioned
                     },
                     onProvisionClick = { currentStep = 1 },
                     onDeleteClick = { kit ->
@@ -123,7 +140,10 @@ fun HardwareConfigScreen(
                 )
                 1 -> {
                     val assignedKits = kitsList.filter {
-                        (it.farmerId == userProfile.uid || (it.farmerId.isEmpty() && it.farmerName.trim().lowercase() == farmerName.trim().lowercase())) && !it.isProvisioned
+                        val matchesFarmer = it.farmerId == userProfile.uid || 
+                                (localFarmerProfile != null && it.farmerId.trim().lowercase() == localFarmerProfile?.id?.trim()?.lowercase()) || 
+                                (it.farmerId.isEmpty() && it.farmerName.trim().lowercase() == farmerName.trim().lowercase())
+                        matchesFarmer && !it.isProvisioned
                     }
                     AssignedKitSelectionView(
                         assignedKits = assignedKits,
@@ -198,6 +218,19 @@ fun HardwareConfigScreen(
                         
                         cacheManager.addHardwareKit(updatedKit)
                         kitsList = cacheManager.getHardwareKits()
+                        
+                        // Also update the Room database for the farmer profile
+                        val currentFarmerProfile = localFarmerProfile
+                        if (currentFarmerProfile != null) {
+                            val updatedProfile = currentFarmerProfile.copy(
+                                deviceId = updatedKit.gatewayId,
+                                deviceSerial = updatedKit.serialNumber,
+                                firmwareVersion = updatedKit.firmwareVersion
+                            )
+                            coroutineScope.launch {
+                                farmerDao.insert(updatedProfile)
+                            }
+                        }
                         
                         // Reset forms
                         kitId = ""

@@ -24,6 +24,8 @@ import com.poultryguard.ai.data.model.Batch
 import com.poultryguard.ai.data.model.BatchStatus
 import com.poultryguard.ai.data.model.ageDays
 import com.poultryguard.ai.data.repository.BatchRepository
+import com.poultryguard.ai.data.cache.LocalCacheManager
+import com.poultryguard.ai.data.cache.AppDatabase
 import com.poultryguard.ai.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,12 +35,18 @@ fun BatchHistoryScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val cacheManager = remember { LocalCacheManager(context.applicationContext) }
+    val db = remember { AppDatabase.getDatabase(context.applicationContext) }
     val batchRepository = remember { BatchRepository(context) }
     var historyList by remember { mutableStateOf(emptyList<Batch>()) }
     var isLoading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        val result = batchRepository.getAllBatches("default_farm")
+        val user = cacheManager.getCachedUserProfile()
+        val farmerProfile = user?.email?.let { db.farmerProfileDao().getFarmerByEmail(it) }
+        val farmerId = farmerProfile?.id ?: user?.uid ?: ""
+        
+        val result = batchRepository.getAllBatches(farmerId)
         result.onSuccess { list ->
             historyList = list
         }

@@ -47,9 +47,8 @@ class MqttManager(
                     onConnectionStateChanged(true)
                     Log.d("PoultryGuardMqtt", "MQTT Connected successfully to: $brokerUrl")
                     
-                    // Stop simulated data timer if running
-                    fallbackTimer?.cancel()
-                    fallbackTimer = null
+                    // Start simulated telemetry feed by default, cancel it only on actual broker messages
+                    startSimulatedMqttFeed()
 
                     // Subscribe to all hardware nodes
                     subscribeToTopic(TOPIC_TEMP)
@@ -80,6 +79,12 @@ class MqttManager(
                             val payload = String(message.payload)
                             val floatVal = payload.toFloatOrNull()
                             if (floatVal != null) {
+                                // Stop simulator feed if running, since real telemetry has arrived
+                                if (fallbackTimer != null) {
+                                    Log.d("PoultryGuardMqtt", "Real message received on $topic. Canceling simulation feed.")
+                                    fallbackTimer?.cancel()
+                                    fallbackTimer = null
+                                }
                                 onReadingReceived(topic, floatVal)
                             }
                         } catch (e: Exception) {

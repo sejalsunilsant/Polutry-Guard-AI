@@ -16,8 +16,8 @@ data class Veterinarian(
     val verificationStatus: String = "PENDING", // PENDING, VERIFIED, REJECTED, SUSPENDED
     val assignedFarmsCount: Int = 0,
     val openCasesCount: Int = 0,
-    val credentialsDetails: String = "Veterinary License Cert #48291-AV, Board Certified in Avian Medicine.",
-    val consultationHistory: String = "1. Consultation: Resolved viral infection on Farm A (10 days ago)\n2. Consultation: Advised feed adjustments on Farm B (3 weeks ago)",
+    val credentialsDetails: String = "",
+    val consultationHistory: String = "",
     
     // Additional requested fields
     val licenseNumber: String = "",

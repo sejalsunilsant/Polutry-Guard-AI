@@ -91,21 +91,10 @@ class DiseasePredictionRepository(private val context: Context) {
             val response = api.predictSound(filePart)
             Result.success(response)
         } catch (e: Exception) {
-            // Local client-side fallback if the API is offline
-            val computedSoundResult = evaluateSoundLocally()
-            Result.success(computedSoundResult)
+            Result.failure(e)
         }
     }
 
-    private fun evaluateSoundLocally(): SoundPredictionResponse {
-        return SoundPredictionResponse(
-            prediction = "Healthy",
-            confidence = 0.88f,
-            probabilities = mapOf("Healthy" to 0.88f, "Sick" to 0.07f, "None" to 0.05f),
-            status = "fallback",
-            message = "Offline mock classification activated (Local fallback)."
-        )
-    }
 
     suspend fun getLatestPrediction(deviceId: String): Result<DiseasePredictionResponse> {
         return try {
@@ -113,11 +102,7 @@ class DiseasePredictionRepository(private val context: Context) {
             val response = api.getLatestPrediction(deviceId)
             Result.success(response)
         } catch (e: Exception) {
-            Result.success(DiseasePredictionResponse(
-                riskLevel = DiseaseRiskLevel.LOW,
-                confidence = 0.0f,
-                recommendation = "OFFLINE: Latest prediction could not be retrieved from the server."
-            ))
+            Result.failure(e)
         }
     }
 
@@ -136,90 +121,8 @@ class DiseasePredictionRepository(private val context: Context) {
             val response = api.predictDisease(request)
             Result.success(response)
         } catch (e: Exception) {
-            // Robust, premium client-side fallback engine to calculate risk locally if REST server is offline
-            val computedRisk = evaluateRiskLocally(temp, humid, ammonia, sound)
-            val advisoryResponse = DiseasePredictionResponse(
-                riskLevel = computedRisk.riskLevel,
-                confidence = computedRisk.confidence,
-                recommendation = "OFFLINE ADVISORY: Server unreachable. Using local estimate. " + computedRisk.recommendation
-            )
-            Result.success(advisoryResponse)
+            Result.failure(e)
         }
     }
 
-    // Local agricultural AI logic to protect the flock offline
-    fun evaluateRiskLocally(
-        temp: Float,
-        humid: Float,
-        ammonia: Float,
-        sound: Float
-    ): DiseasePredictionResponse {
-        return when {
-            // Ammonia critical gas + heat stress -> High risk
-            ammonia >= 25f && temp >= 30f -> {
-                DiseasePredictionResponse(
-                    riskLevel = DiseaseRiskLevel.HIGH,
-                    confidence = 0.92f,
-                    recommendation = "HIGH DISEASE RISK: Elevated Ammonia levels combined with Thermal Stress can trigger respiratory illness. Engage exhaust fans at 100% and initiate biosecurity check."
-                )
-            }
-            // Sound anomaly (panic screaming) -> High risk of trauma/predators
-            sound >= 78f -> {
-                DiseasePredictionResponse(
-                    riskLevel = DiseaseRiskLevel.HIGH,
-                    confidence = 0.88f,
-                    recommendation = "HIGH EVENT RISK: Acute sound surge detected. Potential flock smothering or predator panic inside Shed 4. Inspect site immediately."
-                )
-            }
-            // Milder warnings: medium ammonia or humidity deviations
-            ammonia >= 18f || temp >= 28f || humid >= 75f -> {
-                DiseasePredictionResponse(
-                    riskLevel = DiseaseRiskLevel.MEDIUM,
-                    confidence = 0.75f,
-                    recommendation = "MEDIUM RISK: Ambient dampness and slight gas buildup. Increase air cycling ratios to prevent bacterial growth in wet litter."
-                )
-            }
-            // Standard safe parameters
-            else -> {
-                DiseasePredictionResponse(
-                    riskLevel = DiseaseRiskLevel.LOW,
-                    confidence = 0.95f,
-                    recommendation = "LOW RISK: Environment is pristine. Broilers showing healthy, stable telemetry feed."
-                )
-            }
-        }
-    }
-
-    suspend fun simulateUpload(fileName: String): SoundPredictionResponse {
-        kotlinx.coroutines.delay(1000)
-        return when {
-            fileName.contains("cough", ignoreCase = true) || fileName.contains("Sick", ignoreCase = true) -> {
-                SoundPredictionResponse(
-                    prediction = "Sick",
-                    confidence = 0.94f,
-                    probabilities = mapOf("Healthy" to 0.04f, "Sick" to 0.94f, "None" to 0.02f),
-                    status = "success",
-                    message = "Active coughing matched. Possible Infectious Bronchitis (IB) outbreak."
-                )
-            }
-            fileName.contains("Normal", ignoreCase = true) || fileName.contains("Control", ignoreCase = true) -> {
-                SoundPredictionResponse(
-                    prediction = "Healthy",
-                    confidence = 0.98f,
-                    probabilities = mapOf("Healthy" to 0.98f, "Sick" to 0.01f, "None" to 0.01f),
-                    status = "success",
-                    message = "Acoustics normal. Standard vocalization patterns detected."
-                )
-            }
-            else -> {
-                SoundPredictionResponse(
-                    prediction = "Healthy",
-                    confidence = 0.85f,
-                    probabilities = mapOf("Healthy" to 0.85f, "Sick" to 0.05f, "None" to 0.10f),
-                    status = "success",
-                    message = "Ventilation background noise dominant. No anomalous patterns."
-                )
-            }
-        }
-    }
 }

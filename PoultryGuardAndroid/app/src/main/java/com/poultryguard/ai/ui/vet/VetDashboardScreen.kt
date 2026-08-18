@@ -45,6 +45,8 @@ import com.poultryguard.ai.data.api.DiseasePredictionRepository
 import com.poultryguard.ai.data.api.SoundPredictionResponse
 import com.poultryguard.ai.ui.theme.*
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.asRequestBody
 
 private val StatusGreen = Color(0xFF2E7D32)
 private val StatusGreenBg = Color(0xFFE8F5E9)
@@ -438,12 +440,12 @@ fun VetDashboardScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Owner: ${farmer?.name ?: "Joe Patterson"}",
+                                text = "Owner: ${farmer?.name ?: "Unspecified"}",
                                 style = Typography.bodyMedium,
                                 color = TextMedium
                             )
                             Text(
-                                text = "Farm: ${farmer?.farmName ?: "Greenfield Broilers"} - ${farmer?.farmLocation ?: "Kolhapur Sector 4"}",
+                                text = "Farm: ${farmer?.farmName ?: "Unspecified"} - ${farmer?.farmLocation ?: "Unspecified"}",
                                 style = Typography.bodyMedium,
                                 color = TextMedium
                             )
@@ -454,13 +456,17 @@ fun VetDashboardScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                val phone = farmer?.phone ?: "+15553827492"
-                                val email = farmer?.email ?: "joe.patterson@farmsecure.net"
+                                val phone = farmer?.phone ?: ""
+                                val email = farmer?.email ?: ""
 
                                 Button(
                                     onClick = {
-                                        val intent = Intent(Intent.ACTION_DIAL).apply { data = Uri.parse("tel:$phone") }
-                                        context.startActivity(intent)
+                                        if (phone.isBlank()) {
+                                            android.widget.Toast.makeText(context, "No phone number available", android.widget.Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            val intent = Intent(Intent.ACTION_DIAL).apply { data = Uri.parse("tel:$phone") }
+                                            context.startActivity(intent)
+                                        }
                                     },
                                     shape = RoundedCornerShape(8.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
@@ -473,11 +479,15 @@ fun VetDashboardScreen(
 
                                 Button(
                                     onClick = {
-                                        val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                            data = Uri.parse("smsto:$phone")
-                                            putExtra("sms_body", "Hi ${farmer?.name}, Poultry Guard AI flagged case review: resolving...")
+                                        if (phone.isBlank()) {
+                                            android.widget.Toast.makeText(context, "No phone number available", android.widget.Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                                data = Uri.parse("smsto:$phone")
+                                                putExtra("sms_body", "Hi ${farmer?.name ?: "Farmer"}, Poultry Guard AI flagged case review: resolving...")
+                                            }
+                                            context.startActivity(intent)
                                         }
-                                        context.startActivity(intent)
                                     },
                                     shape = RoundedCornerShape(8.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = BlueSecondary),
@@ -647,15 +657,95 @@ fun AcousticDiagnosticsCard(
     var isRecording by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<SoundPredictionResponse?>(null) }
     var recordingTimer by remember { mutableStateOf(0) }
-    
-    // Select sound files simulator parameters
-    val mockSamples = listOf(
-        "Shed4_IB_ActiveCough.wav" to "Sick sample - coughing matched",
-        "Shed1_ControlNormal.wav" to "Healthy control template",
-        "Shed2_VentilationHum.wav" to "Fan frequency sample"
-    )
-    var selectedSample by remember { mutableStateOf(mockSamples[0]) }
     var isUploading by remember { mutableStateOf(false) }
+
+    var mediaRecorder by remember { mutableStateOf<android.media.MediaRecorder?>(null) }
+    val audioFile = remember { java.io.File(context.cacheDir, "broiler_recording.mp4") }
+
+    fun startRecording() {
+        try {
+            if (audioFile.exists()) {
+                audioFile.delete()
+            }
+            val recorder = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                android.media.MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                android.media.MediaRecorder()
+            }
+            recorder.apply {
+                setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+                setOutputFile(audioFile.absolutePath)
+                prepare()
+                start()
+            }
+            mediaRecorder = recorder
+            isRecording = true
+            result = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Failed to start recording: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun stopRecording() {
+        try {
+            mediaRecorder?.apply {
+                stop()
+                release()
+            }
+            mediaRecorder = null
+            isRecording = false
+
+            // Perform real prediction upload!
+            isUploading = true
+            coroutineScope.launch {
+                val requestFile = audioFile.asRequestBody("audio/*".toMediaTypeOrNull())
+                val filePart = okhttp3.MultipartBody.Part.createFormData(
+                    "file",
+                    audioFile.name,
+                    requestFile
+                )
+                val res = diseaseRepository.predictSoundFile(filePart)
+                res.fold(
+                    onSuccess = { prediction ->
+                        result = prediction
+                    },
+                    onFailure = { err ->
+                        Toast.makeText(context, "Prediction failed: ${err.localizedMessage}", Toast.LENGTH_LONG).show()
+                    }
+                )
+                isUploading = false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            isRecording = false
+            isUploading = false
+            Toast.makeText(context, "Error stopping recorder: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            startRecording()
+        } else {
+            Toast.makeText(context, "Audio recording permission is required.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                mediaRecorder?.release()
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
 
     LaunchedEffect(isRecording) {
         if (isRecording) {
@@ -665,14 +755,7 @@ fun AcousticDiagnosticsCard(
                 recordingTimer++
             }
             if (isRecording) {
-                isRecording = false
-                // Simulating audio recording upload
-                isUploading = true
-                coroutineScope.launch {
-                    val res = diseaseRepository.simulateUpload(selectedSample.first)
-                    result = res
-                    isUploading = false
-                }
+                stopRecording()
             }
         }
     }
@@ -685,46 +768,17 @@ fun AcousticDiagnosticsCard(
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
-                text = "Simulate Acoustic Intake",
+                text = "Real Acoustic Diagnostics",
                 style = Typography.bodyLarge,
                 fontWeight = FontWeight.Bold,
                 color = TextDark
             )
             Text(
-                text = "Record or select a simulated WAV audio file to test the AI classifier",
+                text = "Record up to 10 seconds of raw broiler audio to execute real sound ML prediction",
                 style = Typography.labelMedium,
                 color = TextMedium,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
-
-            // Select simulated WAV dropdown/list
-            Text("Target Clip:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextDark)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                mockSamples.forEach { sample ->
-                    val active = selectedSample.first == sample.first
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (active) GreenPrimary.copy(alpha = 0.12f) else AppBackground)
-                            .clickable { selectedSample = sample }
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = sample.first.substringBefore("_"),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (active) GreenPrimary else TextMedium
-                        )
-                    }
-                }
-            }
 
             Spacer(modifier = Modifier.height(14.dp))
 
@@ -732,10 +786,18 @@ fun AcousticDiagnosticsCard(
             Button(
                 onClick = {
                     if (isRecording) {
-                        isRecording = false
+                        stopRecording()
                     } else {
-                        result = null
-                        isRecording = true
+                        val permission = android.Manifest.permission.RECORD_AUDIO
+                        val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                            context, permission
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        
+                        if (hasPermission) {
+                            startRecording()
+                        } else {
+                            permissionLauncher.launch(permission)
+                        }
                     }
                 },
                 enabled = !isUploading,

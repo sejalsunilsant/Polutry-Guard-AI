@@ -216,12 +216,8 @@ class BatchRepository(private val context: Context) {
                     throw Exception(response.message ?: "Server rejected mortality event.")
                 }
             } else {
-                val updatedBatch = cachedBatch.copy(
-                    currentCount = cachedBatch.currentCount - deathCount
-                )
-                cacheManager.cacheActiveBatch(updatedBatch)
                 mortalityDao.insert(record)
-                return@withContext Result.success(updatedBatch)
+                return@withContext Result.success(cachedBatch)
             }
         } catch (e: Exception) {
             Log.e("BatchRepository", "Failed to record batch mortality: ${e.localizedMessage}")

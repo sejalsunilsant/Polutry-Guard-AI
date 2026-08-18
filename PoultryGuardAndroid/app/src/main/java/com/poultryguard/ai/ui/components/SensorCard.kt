@@ -136,7 +136,7 @@ fun SensorCard(
                     modifier = Modifier.padding(vertical = 4.dp)
                 ) {
                     Text(
-                        text = "%.1f".format(reading.value),
+                        text = if (reading.value != null) "%.1f".format(reading.value) else "--",
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextDark,

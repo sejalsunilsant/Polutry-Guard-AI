@@ -167,3 +167,102 @@ def review_farmer_route():
     except Exception as e:
         print(f"[Auth API] Error in review_farmer_route: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@user_bp.route('/api/v1/admin/farmers', methods=['GET'])
+def get_all_farmers_route():
+    try:
+        from data.supabase_client import get_all_farmers
+        farmers = get_all_farmers()
+        return jsonify({
+            "status": "success",
+            "data": farmers
+        }), 200
+    except Exception as e:
+        print(f"[Auth API] Error in get_all_farmers_route: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@user_bp.route('/api/v1/veterinarians', methods=['GET'])
+def get_all_veterinarians_route():
+    try:
+        from data.supabase_client import get_all_veterinarians
+        vets = get_all_veterinarians()
+        return jsonify({
+            "status": "success",
+            "data": vets
+        }), 200
+    except Exception as e:
+        print(f"[Auth API] Error in get_all_veterinarians_route: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@user_bp.route('/api/v1/users/<profile_id>/context', methods=['GET'])
+def get_user_context(profile_id):
+    try:
+        from data.supabase_client import supabase
+        if not supabase:
+            # Fallback for offline mock testing if supabase isn't connected
+            return jsonify({
+                "status": "success",
+                "data": {
+                    "profileId": profile_id,
+                    "name": "Fallback User",
+                    "email": "user@example.com",
+                    "role": "FARMER",
+                    "farmId": "farm_fallback",
+                    "farmName": "Fallback Farm",
+                    "deviceId": "esp32_devkitc_fallback",
+                    "deviceName": "Fallback ESP32 Node",
+                    "thingspeakChannelId": "12345",
+                    "thingspeakReadApiKey": "KEY123"
+                }
+            }), 200
+
+        # Fetch profile
+        profile_res = supabase.table("profiles").select("*").eq("id", profile_id).execute()
+        if not profile_res.data:
+            return jsonify({'error': 'Profile not found'}), 404
+
+        profile = profile_res.data[0]
+        role = profile.get("role", "FARMER")
+
+        context_data = {
+            "profileId": profile_id,
+            "name": profile.get("name"),
+            "email": profile.get("email"),
+            "role": role,
+            "farmId": None,
+            "farmName": None,
+            "deviceId": None,
+            "deviceName": None,
+            "thingspeakChannelId": None,
+            "thingspeakReadApiKey": None
+        }
+
+        if role == "FARMER":
+            member_res = supabase.table("farm_members").select("farm_id").eq("profile_id", profile_id).execute()
+            if member_res.data:
+                farm_id = member_res.data[0].get("farm_id")
+                context_data["farmId"] = farm_id
+
+                farm_res = supabase.table("farms").select("name").eq("id", farm_id).execute()
+                if farm_res.data:
+                    context_data["farmName"] = farm_res.data[0].get("name")
+
+                device_res = supabase.table("devices").select("*").eq("farm_id", farm_id).execute()
+                if device_res.data:
+                    device = device_res.data[0]
+                    context_data["deviceId"] = device.get("id")
+                    context_data["deviceName"] = device.get("name")
+                    context_data["thingspeakChannelId"] = device.get("thingspeak_channel_id")
+                    context_data["thingspeakReadApiKey"] = device.get("thingspeak_read_api_key")
+
+        return jsonify({
+            "status": "success",
+            "data": context_data
+        }), 200
+    except Exception as e:
+        print(f"[Auth API] Error in get_user_context: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
