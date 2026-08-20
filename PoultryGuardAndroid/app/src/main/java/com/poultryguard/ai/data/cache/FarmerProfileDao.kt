@@ -29,4 +29,7 @@ interface FarmerProfileDao {
 
     @Query("SELECT * FROM farmer_profiles WHERE id = :id LIMIT 1")
     suspend fun getFarmerById(id: String): FarmerProfile?
+
+    @Query("DELETE FROM farmer_profiles")
+    suspend fun deleteAll()
 }

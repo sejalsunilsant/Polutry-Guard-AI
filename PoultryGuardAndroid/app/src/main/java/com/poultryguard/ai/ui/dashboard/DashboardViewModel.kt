@@ -42,7 +42,7 @@ sealed interface DashboardUiState {
         val diseasePrediction: DiseasePredictionResponse = DiseasePredictionResponse(
             riskLevel = DiseaseRiskLevel.LOW,
             confidence = 0.0f,
-            recommendation = ""
+            recommendation = "No prediction available"
         ),
         val isMqttConnected: Boolean = false
     ) : DashboardUiState
@@ -58,14 +58,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
     // AI Chat states
-    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(
-        listOf(
-            ChatMessage(
-                sender = "AI",
-                text = "Hi Joe! 🐔 I am ChickBot, your AI Farm Assistant. I am monitoring Shed #4 in real-time. Ask me any biosecurity or temperature safety questions!"
-            )
-        )
-    )
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
 
     private val _isTyping = MutableStateFlow(false)
@@ -78,19 +71,23 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val batchRepository = BatchRepository(application.applicationContext)
     private var mqttManager: MqttManager? = null
 
-    private var currentTemp = 0.0f
-    private var currentHumid = 0.0f
-    private var currentAmmonia = 0.0f
-    private var currentSound = 0.0f
+    private var currentTemp: Float? = null
+    private var currentHumid: Float? = null
+    private var currentAmmonia: Float? = null
+    private var currentSound: Float? = null
     
+    private val _isMqttConnected = MutableStateFlow(false) // just placeholder for matches
     private var activeBatch: Batch? = null
     private var unsyncedMortalities = 0
+    private var farmerId: String = ""
+    private var farmId: String = ""
+    private var deviceId: String = ""
 
     private var activeMqttConnection = false
     private var currentPrediction = DiseasePredictionResponse(
         riskLevel = DiseaseRiskLevel.LOW,
         confidence = 0.0f,
-        recommendation = ""
+        recommendation = "No prediction available"
     )
 
     init {
@@ -100,10 +97,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun loadCachedData() {
         val cachedTelemetry = cacheManager.getCachedTelemetry()
-        currentTemp = cachedTelemetry["temp"] ?: 0.0f
-        currentHumid = cachedTelemetry["humid"] ?: 0.0f
-        currentAmmonia = cachedTelemetry["ammonia"] ?: 0.0f
-        currentSound = cachedTelemetry["sound"] ?: 0.0f
+        currentTemp = cachedTelemetry["temp"]
+        currentHumid = cachedTelemetry["humid"]
+        currentAmmonia = cachedTelemetry["ammonia"]
+        currentSound = cachedTelemetry["sound"]
         
         activeBatch = cacheManager.getCachedActiveBatch()
     }
@@ -112,11 +109,59 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             _uiState.value = DashboardUiState.Loading
             
+            val user = cacheManager.getCachedUserProfile()
+            val db = com.poultryguard.ai.data.cache.AppDatabase.getDatabase(getApplication())
+            val farmerProfile = user?.email?.let { db.farmerProfileDao().getFarmerByEmail(it) }
+            
+            if (farmerProfile != null) {
+                farmerId = farmerProfile.id
+                deviceId = farmerProfile.deviceId
+            } else {
+                farmerId = user?.uid ?: ""
+                deviceId = ""
+            }
+            farmId = user?.farmId ?: farmerId
+
+            // Fetch authoritative farm/device context from backend (mirrors refreshData logic)
+            if (user != null && farmerId.isNotBlank()) {
+                try {
+                    val authRepo = com.poultryguard.ai.data.repository.SupabaseAuthRepository(getApplication())
+                    val contextResult = authRepo.fetchUserContext(farmerId)
+                    contextResult.onSuccess { dto ->
+                        farmId = dto.farmId ?: farmId
+                        deviceId = dto.deviceId ?: deviceId
+                    }
+                } catch (e: Exception) {
+                    // Network unavailable — fall through to local cache lookup below
+                }
+            }
+
+            // Fallback device ID lookup from SharedPreferences if empty (e.g. offline setup)
+            if (deviceId.isBlank() && farmerId.isNotEmpty()) {
+                val localKits = cacheManager.getHardwareKits()
+                val assignedKit = localKits.find { 
+                    it.farmerId == farmerId || 
+                    (farmerProfile != null && it.farmerId.trim().lowercase() == farmerProfile.id.trim().lowercase()) ||
+                    (it.farmerId.isEmpty() && it.farmerName.trim().lowercase() == (farmerProfile?.name ?: user?.name ?: "").trim().lowercase())
+                }
+                if (assignedKit != null) {
+                    deviceId = assignedKit.gatewayId
+                }
+            }
+ 
+            val farmerName = farmerProfile?.name ?: user?.name ?: "Farmer"
+            _chatMessages.value = listOf(
+                ChatMessage(
+                    sender = "AI",
+                    text = "Hi $farmerName! 🐔 I am ChickBot, your AI Farm Assistant. I am monitoring your farm in real-time. Ask me any biosecurity or temperature safety questions!"
+                )
+            )
+             
             // Sync outbox
             batchRepository.syncUnsyncedMortalities()
-            
+             
             // Get active batch from repository
-            val batchResult = batchRepository.getActiveBatch("default_farm")
+            val batchResult = batchRepository.getActiveBatch(farmId)
             batchResult.onSuccess { batch ->
                 activeBatch = batch
                 unsyncedMortalities = batch?.let { batchRepository.getUnsyncedMortalityCount(it.id) } ?: 0
@@ -129,10 +174,12 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+
     fun loadLatestPrediction() {
+        if (deviceId.isBlank()) return
         viewModelScope.launch {
             val result = diseaseRepository.getLatestPrediction(
-                deviceId = "default_device"
+                deviceId = deviceId
             )
             result.onSuccess { prediction ->
                 currentPrediction = prediction
@@ -142,14 +189,15 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun triggerPrediction() {
+        if (deviceId.isBlank()) return
         viewModelScope.launch {
             val result = diseaseRepository.predictDiseaseRisk(
-                deviceId = "default_device",
-                farmId = "default_farm",
-                temp = currentTemp,
-                humid = currentHumid,
-                ammonia = currentAmmonia,
-                sound = currentSound
+                deviceId = deviceId,
+                farmId = farmId,
+                temp = currentTemp ?: 0f,
+                humid = currentHumid ?: 0f,
+                ammonia = currentAmmonia ?: 0f,
+                sound = currentSound ?: 0f
             )
             result.onSuccess { prediction ->
                 currentPrediction = prediction
@@ -203,13 +251,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 activeBatch = updated
                 unsyncedMortalities = batchRepository.getUnsyncedMortalityCount(updated.id)
                 
-                if (symptoms.isNotEmpty() && symptoms.contains("Respiratory Snick")) {
-                    currentPrediction = DiseasePredictionResponse(
-                        riskLevel = DiseaseRiskLevel.HIGH,
-                        confidence = 0.90f,
-                        recommendation = "HIGH DISEASE RISK: Active coughing (Snick) symptoms logged alongside telemetry. Cycle fans to ventilate."
-                    )
-                }
+                // Simulated prediction generation based on symptoms removed.
                 updateDashboardState()
             }
         }
@@ -233,10 +275,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 0
             }
             val context = FarmContext(
-                currentTemperature = currentTemp,
-                currentHumidity = currentHumid,
-                currentAmmonia = currentAmmonia,
-                currentSoundLevel = currentSound,
+                currentTemperature = currentTemp ?: 0f,
+                currentHumidity = currentHumid ?: 0f,
+                currentAmmonia = currentAmmonia ?: 0f,
+                currentSoundLevel = currentSound ?: 0f,
                 birdCount = dynamicBirdCount,
                 loggedMortalities = unsyncedMortalities,
                 activeShed = currentBatch?.let { "${it.id} (${it.breed})" } ?: "No Active Batch"
@@ -260,10 +302,40 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             _isRefreshing.value = true
             setupMqtt()
             
+            val user = cacheManager.getCachedUserProfile()
+            if (user != null) {
+                try {
+                    val authRepo = com.poultryguard.ai.data.repository.SupabaseAuthRepository(getApplication())
+                    val contextResult = authRepo.fetchUserContext(user.uid)
+                    contextResult.onSuccess { dto ->
+                        farmerId = dto.profileId
+                        farmId = dto.farmId ?: ""
+                        deviceId = dto.deviceId ?: ""
+                    }
+                } catch (e: Exception) {
+                    // Ignore context sync failure on refresh
+                }
+            }
+
+            // Fallback device ID lookup from SharedPreferences if empty (e.g. offline setup or sync override)
+            if (deviceId.isBlank() && farmerId.isNotEmpty()) {
+                val db = com.poultryguard.ai.data.cache.AppDatabase.getDatabase(getApplication())
+                val farmerProfile = db.farmerProfileDao().getFarmerById(farmerId)
+                val localKits = cacheManager.getHardwareKits()
+                val assignedKit = localKits.find { 
+                    it.farmerId == farmerId || 
+                    (farmerProfile != null && it.farmerId.trim().lowercase() == farmerProfile.id.trim().lowercase()) ||
+                    (it.farmerId.isEmpty() && it.farmerName.trim().lowercase() == (farmerProfile?.name ?: user?.name ?: "").trim().lowercase())
+                }
+                if (assignedKit != null) {
+                    deviceId = assignedKit.gatewayId
+                }
+            }
+
             // Sync outbox
             batchRepository.syncUnsyncedMortalities()
-            
-            val batchResult = batchRepository.getActiveBatch("default_farm")
+             
+            val batchResult = batchRepository.getActiveBatch(farmId)
             batchResult.onSuccess { batch ->
                 activeBatch = batch
                 unsyncedMortalities = batch?.let { batchRepository.getUnsyncedMortalityCount(it.id) } ?: 0
@@ -278,7 +350,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun refreshMortalityCount() {
         viewModelScope.launch {
-            val batchResult = batchRepository.getActiveBatch("default_farm")
+            val batchResult = batchRepository.getActiveBatch(farmId)
             batchResult.onSuccess { batch ->
                 activeBatch = batch
                 unsyncedMortalities = batch?.let { batchRepository.getUnsyncedMortalityCount(it.id) } ?: 0
@@ -289,7 +361,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun startNewBatch(startDate: String, initialCount: Int, breed: String, onSuccess: () -> Unit) {
         viewModelScope.launch {
-            val result = batchRepository.startBatch("default_farm", startDate, initialCount, breed)
+            val result = batchRepository.startBatch(farmId, startDate, initialCount, breed)
             result.onSuccess { newBatch ->
                 activeBatch = newBatch
                 unsyncedMortalities = 0
@@ -372,8 +444,9 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             0
         }
         
+        val user = cacheManager.getCachedUserProfile()
         val dynamicShedName = if (currentBatch != null) {
-            "Shed #4 (${currentBatch.id} - ${currentBatch.breed} - Day ${currentBatch.ageDays})"
+            "${user?.farmName?.ifBlank { "Farm" } ?: "Farm"} (${currentBatch.id} - ${currentBatch.breed} - Day ${currentBatch.ageDays})"
         } else {
             "No Active Batch"
         }
@@ -391,73 +464,76 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
-    fun triggerSimulatedSpike(type: String) {
-        viewModelScope.launch {
-            when (type) {
-                "ammonia" -> currentAmmonia = 32.5f
-                "sound" -> currentSound = 88.0f
-                "temp" -> currentTemp = 31.8f
-                "reset" -> {
-                    currentTemp = 24.2f
-                    currentHumid = 61.5f
-                    currentAmmonia = 12.0f
-                    currentSound = 54.0f
-                }
-            }
-            
-            currentPrediction = diseaseRepository.evaluateRiskLocally(
-                currentTemp, currentHumid, currentAmmonia, currentSound
-            )
-            updateDashboardState()
+    private fun getTempStatus(valFloat: Float?): SensorStatus {
+        if (valFloat == null) return SensorStatus.IDEAL
+        return when {
+            valFloat < 19f || valFloat > 30f -> SensorStatus.CRITICAL
+            valFloat < 21f || valFloat > 27f -> SensorStatus.WARNING
+            else -> SensorStatus.IDEAL
         }
     }
 
-    private fun getTempStatus(valFloat: Float): SensorStatus = when {
-        valFloat < 19f || valFloat > 30f -> SensorStatus.CRITICAL
-        valFloat < 21f || valFloat > 27f -> SensorStatus.WARNING
-        else -> SensorStatus.IDEAL
+    private fun getTempDescription(valFloat: Float?): String {
+        if (valFloat == null) return "Waiting for temperature telemetry..."
+        return when (getTempStatus(valFloat)) {
+            SensorStatus.IDEAL -> "Shed heat is in standard cozy broiler comfort range."
+            SensorStatus.WARNING -> "Mild thermal variance. Keep monitoring ventilation."
+            SensorStatus.CRITICAL -> if (valFloat > 30f) "HEAT STRESS! Trigger misting pumps immediately!" else "CHILL HAZARD! Turn on brooder heaters."
+        }
     }
 
-    private fun getTempDescription(valFloat: Float): String = when (getTempStatus(valFloat)) {
-        SensorStatus.IDEAL -> "Shed heat is in standard cozy broiler comfort range."
-        SensorStatus.WARNING -> "Mild thermal variance. Keep monitoring ventilation."
-        SensorStatus.CRITICAL -> if (valFloat > 30f) "HEAT STRESS! Trigger misting pumps immediately!" else "CHILL HAZARD! Turn on brooder heaters."
+    private fun getHumidStatus(valFloat: Float?): SensorStatus {
+        if (valFloat == null) return SensorStatus.IDEAL
+        return when {
+            valFloat < 45f || valFloat > 80f -> SensorStatus.CRITICAL
+            valFloat < 50f || valFloat > 70f -> SensorStatus.WARNING
+            else -> SensorStatus.IDEAL
+        }
     }
 
-    private fun getHumidStatus(valFloat: Float): SensorStatus = when {
-        valFloat < 45f || valFloat > 80f -> SensorStatus.CRITICAL
-        valFloat < 50f || valFloat > 70f -> SensorStatus.WARNING
-        else -> SensorStatus.IDEAL
+    private fun getHumidDescription(valFloat: Float?): String {
+        if (valFloat == null) return "Waiting for humidity telemetry..."
+        return when (getHumidStatus(valFloat)) {
+            SensorStatus.IDEAL -> "Cohesive humidity level. Dampness check OK."
+            SensorStatus.WARNING -> "Moderate dampness. Check air replacement cycles."
+            SensorStatus.CRITICAL -> "Heavy dampness risk! Fans must increase throughput."
+        }
     }
 
-    private fun getHumidDescription(valFloat: Float): String = when (getHumidStatus(valFloat)) {
-        SensorStatus.IDEAL -> "Cohesive humidity level. Dampness check OK."
-        SensorStatus.WARNING -> "Moderate dampness. Check air replacement cycles."
-        SensorStatus.CRITICAL -> "Heavy dampness risk! Fans must increase throughput."
+    private fun getAmmoniaStatus(valFloat: Float?): SensorStatus {
+        if (valFloat == null) return SensorStatus.IDEAL
+        return when {
+            valFloat >= 25f -> SensorStatus.CRITICAL
+            valFloat >= 16f -> SensorStatus.WARNING
+            else -> SensorStatus.IDEAL
+        }
     }
 
-    private fun getAmmoniaStatus(valFloat: Float): SensorStatus = when {
-        valFloat >= 25f -> SensorStatus.CRITICAL
-        valFloat >= 16f -> SensorStatus.WARNING
-        else -> SensorStatus.IDEAL
+    private fun getAmmoniaDescription(valFloat: Float?): String {
+        if (valFloat == null) return "Waiting for ammonia telemetry..."
+        return when (getAmmoniaStatus(valFloat)) {
+            SensorStatus.IDEAL -> "Ammonia is safe. Air quality is pristine."
+            SensorStatus.WARNING -> "Slight gas buildup detected. Cycle exhaust fans."
+            SensorStatus.CRITICAL -> "CRITICAL EXPOSURE! Litter needs treating/venting."
+        }
     }
 
-    private fun getAmmoniaDescription(valFloat: Float): String = when (getAmmoniaStatus(valFloat)) {
-        SensorStatus.IDEAL -> "Ammonia is safe. Air quality is pristine."
-        SensorStatus.WARNING -> "Slight gas buildup detected. Cycle exhaust fans."
-        SensorStatus.CRITICAL -> "CRITICAL EXPOSURE! Litter needs treating/venting."
+    private fun getSoundStatus(valFloat: Float?): SensorStatus {
+        if (valFloat == null) return SensorStatus.IDEAL
+        return when {
+            valFloat >= 75f -> SensorStatus.CRITICAL
+            valFloat >= 66f -> SensorStatus.WARNING
+            else -> SensorStatus.IDEAL
+        }
     }
 
-    private fun getSoundStatus(valFloat: Float): SensorStatus = when {
-        valFloat >= 75f -> SensorStatus.CRITICAL
-        valFloat >= 66f -> SensorStatus.WARNING
-        else -> SensorStatus.IDEAL
-    }
-
-    private fun getSoundDescription(valFloat: Float): String = when (getSoundStatus(valFloat)) {
-        SensorStatus.IDEAL -> "Steady, natural chirping levels. Flock is calm."
-        SensorStatus.WARNING -> "Elevated noise. Disturbance or feeding rush active."
-        SensorStatus.CRITICAL -> "CRITICAL SCREAM! Predator, sound shock or power outage!"
+    private fun getSoundDescription(valFloat: Float?): String {
+        if (valFloat == null) return "Waiting for acoustic telemetry..."
+        return when (getSoundStatus(valFloat)) {
+            SensorStatus.IDEAL -> "Steady, natural chirping levels. Flock is calm."
+            SensorStatus.WARNING -> "Elevated noise. Disturbance or feeding rush active."
+            SensorStatus.CRITICAL -> "CRITICAL SCREAM! Predator, sound shock or power outage!"
+        }
     }
 
     override fun onCleared() {

@@ -24,7 +24,7 @@ captures/
 *.iml
 *.ipr
 *.iws
-
+.env
 # --- Large Datasets & Archives ---
 *.zip
 *.xlsx
@@ -44,3 +44,5 @@ D:\poltry_gard_ai_repo\.venv
 *.flat
 *.len
 *.pb
+farm_ai_backend/data/knowledge_base/poultry_stress_labeled_dataset.csv
+.env

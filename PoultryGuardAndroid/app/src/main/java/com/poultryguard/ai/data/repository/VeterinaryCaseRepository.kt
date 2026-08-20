@@ -72,13 +72,67 @@ class VeterinaryCaseRepository(context: Context) {
         }
     }
 
-    suspend fun submitDiagnosis(caseId: String, diagnosis: String, recommendation: String): Result<Unit> {
+    private val consultationDao = db.consultationDao()
+    private val mortalityDao = db.mortalityDao()
+
+    fun getConsultationsForVetFlow(vetId: String): Flow<List<com.poultryguard.ai.data.model.Consultation>> =
+        consultationDao.getConsultationsForVetFlow(vetId)
+
+    fun getAllMortalityRecordsFlow(): Flow<List<com.poultryguard.ai.data.model.MortalityRecord>> =
+        mortalityDao.getAllRecordsFlow()
+
+    suspend fun scheduleConsultation(
+        vetId: String,
+        farmerId: String,
+        farmerName: String,
+        dateTime: Long,
+        notes: String,
+        followUpDate: Long
+    ): Result<Unit> {
+        return try {
+            val consultation = com.poultryguard.ai.data.model.Consultation(
+                id = UUID.randomUUID().toString(),
+                veterinarianId = vetId,
+                farmerId = farmerId,
+                farmerName = farmerName,
+                dateTime = dateTime,
+                notes = notes,
+                followUpDate = followUpDate,
+                status = "SCHEDULED"
+            )
+            consultationDao.insert(consultation)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateConsultationStatus(id: String, status: String): Result<Unit> {
+        return try {
+            val consultation = consultationDao.getConsultationById(id) ?: throw Exception("Consultation not found.")
+            val updated = consultation.copy(status = status)
+            consultationDao.insert(updated)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitDiagnosis(
+        caseId: String,
+        diagnosis: String,
+        recommendation: String,
+        treatment: String,
+        followUpInstructions: String
+    ): Result<Unit> {
         return try {
             val vetCase = veterinaryCaseDao.getCaseById(caseId) ?: throw Exception("Case not found.")
             val updated = vetCase.copy(
                 status = "DIAGNOSED",
                 diagnosis = diagnosis,
                 recommendation = recommendation,
+                treatment = treatment,
+                followUpInstructions = followUpInstructions,
                 updatedAt = System.currentTimeMillis()
             )
             veterinaryCaseDao.insert(updated)

@@ -5,10 +5,12 @@ data class UserProfile(
     val name: String = "",
     val email: String = "",
     val role: UserRole = UserRole.FARMER,
-    val farmName: String = "Greenfield Broilers",
+    val farmName: String = "",
     val joinDate: String = "",
     val approvalStatus: String = "APPROVED",
-    val rejectionReason: String? = null
+    val rejectionReason: String? = null,
+    val farmId: String? = null,
+    val token: String? = null
 )
 
 enum class UserRole {

@@ -1,5 +1,6 @@
 package com.poultryguard.ai.ui.admin
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -25,22 +26,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.poultryguard.ai.data.api.AssignKitRequest
+import com.poultryguard.ai.data.api.CreateKitRequest
 import com.poultryguard.ai.data.cache.LocalCacheManager
 import com.poultryguard.ai.data.model.HardwareKit
 import com.poultryguard.ai.data.model.SystemStats
 import com.poultryguard.ai.ui.theme.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-data class IoTNode(
-    val id: String,
-    val battery: String,
-    val rssi: String,
-    val status: String
-)
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,6 +89,11 @@ fun AdminDashboardScreen(
     val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(context) }
     val vetsListState by vetRepository.getVeterinariansFlow().collectAsState(initial = emptyList())
     var selectedVet by remember { mutableStateOf<com.poultryguard.ai.data.model.Veterinarian?>(null) }
+    val authRepository = remember { com.poultryguard.ai.data.repository.SupabaseAuthRepository(context) }
+    LaunchedEffect(Unit) {
+        authRepository.syncAllFarmers()
+        vetRepository.syncVeterinarians()
+    }
     var showAddVetDialog by remember { mutableStateOf(false) }
 
     var vetSearchQuery by remember { mutableStateOf("") }
@@ -150,60 +156,7 @@ fun AdminDashboardScreen(
 
     // Seed mock data for demonstration if empty
     var kitsList by remember {
-        val cached = cacheManager.getHardwareKits()
-        if (cached.isEmpty()) {
-            val defaults = listOf(
-                HardwareKit(
-                    kitId = "PG-KIT-00045",
-                    gatewayId = "ESP32-0045",
-                    serialNumber = "PGESP0045",
-                    firmwareVersion = "1.2.0",
-                    lifecycleStatus = "Available",
-                    hasTempSensor = true,
-                    hasHumidSensor = true,
-                    hasAmmoniaSensor = true,
-                    hasSoundSensor = true,
-                    hasCameraSensor = true,
-                    farmerName = "",
-                    farmName = "",
-                    lastCommunication = "Offline (No data logged)"
-                ),
-                HardwareKit(
-                    kitId = "PG-KIT-00021",
-                    gatewayId = "ESP32-0021",
-                    serialNumber = "PGESP0021",
-                    firmwareVersion = "1.1.5",
-                    lifecycleStatus = "Active",
-                    hasTempSensor = true,
-                    hasHumidSensor = true,
-                    hasAmmoniaSensor = true,
-                    hasSoundSensor = true,
-                    hasCameraSensor = false,
-                    farmerName = "Joe Patterson",
-                    farmName = "Shed #4 (Broilers)",
-                    lastCommunication = "Active (10 seconds ago)"
-                ),
-                HardwareKit(
-                    kitId = "PG-KIT-00012",
-                    gatewayId = "ESP32-0012",
-                    serialNumber = "PGESP0012",
-                    firmwareVersion = "1.0.8",
-                    lifecycleStatus = "Maintenance",
-                    hasTempSensor = true,
-                    hasHumidSensor = true,
-                    hasAmmoniaSensor = false,
-                    hasSoundSensor = true,
-                    hasCameraSensor = false,
-                    farmerName = "Joe Patterson",
-                    farmName = "Shed #2 (Breeders)",
-                    lastCommunication = "Offline (5 days ago)"
-                )
-            )
-            cacheManager.saveHardwareKits(defaults)
-            mutableStateOf(defaults)
-        } else {
-            mutableStateOf(cached)
-        }
+        mutableStateOf(cacheManager.getHardwareKits())
     }
 
     var selectedTab by remember { mutableStateOf(0) }
@@ -219,11 +172,7 @@ fun AdminDashboardScreen(
     var searchQuery by remember { mutableStateOf("") }
     var statusFilter by remember { mutableStateOf("All") }
 
-    val nodes = listOf(
-        IoTNode("Node #4A (Temp/Humid)", "98%", "-54 dBm", "ONLINE"),
-        IoTNode("Node #4B (Ammonia)", "94%", "-62 dBm", "ONLINE"),
-        IoTNode("Node #4C (Sound Mic)", "85%", "-59 dBm", "ONLINE")
-    )
+
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -292,6 +241,12 @@ fun AdminDashboardScreen(
                     onClick = { selectedTab = 4 },
                     icon = { Icon(Icons.Default.Feedback, contentDescription = "Support") },
                     label = { Text("Support") }
+                )
+                NavigationBarItem(
+                    selected = selectedTab == 5,
+                    onClick = { selectedTab = 5 },
+                    icon = { Icon(Icons.Default.Map, contentDescription = "Map") },
+                    label = { Text("Map") }
                 )
             }
         }
@@ -1190,61 +1145,6 @@ fun AdminDashboardScreen(
                             }
                         }
 
-                        // Node health list
-                        item {
-                            Text(
-                                text = "IoT Shed Wireless Node Health",
-                                style = Typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = TextDark,
-                                modifier = Modifier.padding(top = 8.dp)
-                            )
-                        }
-
-                        items(nodes) { node ->
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = CardSurface)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(12.dp)
-                                                .clip(CircleShape)
-                                                .background(if (node.status == "ONLINE") GreenPrimary else AlertRed)
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Column {
-                                            Text(
-                                                text = node.id,
-                                                style = Typography.bodyLarge,
-                                                fontWeight = FontWeight.Bold,
-                                                color = TextDark
-                                            )
-                                            Text(
-                                                text = "RF Strength: ${node.rssi} • Batt: ${node.battery}",
-                                                style = Typography.labelMedium,
-                                                color = TextMedium
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = node.status,
-                                        style = Typography.labelMedium,
-                                        color = GreenPrimary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
                 3 -> {
@@ -1335,13 +1235,32 @@ fun AdminDashboardScreen(
                                         kit = kit,
                                         onAssignClick = { activeAssignKit = kit },
                                         onUnassignClick = {
+                                            val farmerIdToClear = kit.farmerId
                                             val updatedList = kitsList.map { k ->
                                                 if (k.kitId == kit.kitId) {
-                                                    k.copy(farmerName = "", farmName = "", lifecycleStatus = "Available")
+                                                    k.copy(
+                                                        farmerId = "",
+                                                        farmerName = "",
+                                                        farmName = "",
+                                                        lifecycleStatus = "Available"
+                                                    )
                                                 } else k
                                             }
                                             kitsList = updatedList
                                             cacheManager.saveHardwareKits(updatedList)
+                                            if (farmerIdToClear.isNotEmpty()) {
+                                                coroutineScope.launch {
+                                                    val farmerProfile = farmerDao.getFarmerById(farmerIdToClear)
+                                                    if (farmerProfile != null) {
+                                                        val updatedProfile = farmerProfile.copy(
+                                                            deviceId = "",
+                                                            deviceSerial = "",
+                                                            firmwareVersion = ""
+                                                        )
+                                                        farmerDao.insert(updatedProfile)
+                                                    }
+                                                }
+                                            }
                                             updateStats {
                                                 it.copy(
                                                     activeFarmers = (it.activeFarmers - 1).coerceAtLeast(0),
@@ -1548,22 +1467,28 @@ fun AdminDashboardScreen(
                             }
                         }
                     }
+                }
+                5 -> {
+                    AdminMapView(farmers = farmersListState)
+                }
             }
         }
-    }
 
         if (showAddKitDialog) {
             AddKitDialog(
                 onDismiss = { showAddKitDialog = false },
                 onAddKit = { newKit ->
-                                    val updated = kitsList.toMutableList().apply { add(newKit) }
-                                    kitsList = updated
-                                    cacheManager.saveHardwareKits(updated)
-                                    updateStats { it.copy(totalDevices = it.totalDevices + 1, offlineDevices = it.offlineDevices + 1) }
-                                    showAddKitDialog = false
-                                    Toast.makeText(context, "Successfully registered Device Kit ${newKit.kitId}!", Toast.LENGTH_SHORT).show()
-                                },
-                nextSuggestedId = "PG-KIT-000${kitsList.size + 46}"
+                    val updated = kitsList.toMutableList().apply { add(newKit) }
+                    kitsList = updated
+                    cacheManager.saveHardwareKits(updated)
+                    updateStats { it.copy(totalDevices = it.totalDevices + 1, offlineDevices = it.offlineDevices + 1) }
+                    showAddKitDialog = false
+                    Toast.makeText(context, "Successfully registered Device Kit ${newKit.kitId}!", Toast.LENGTH_SHORT).show()
+                },
+                nextSuggestedId = "PG-KIT-000${kitsList.size + 46}",
+                authRepository = authRepository,
+                coroutineScope = coroutineScope,
+                context = context
             )
         }
 
@@ -1573,28 +1498,93 @@ fun AdminDashboardScreen(
                 farmers = farmersListState,
                 onDismiss = { activeAssignKit = null },
                 onAssign = { id, farmer, farm ->
-                    val updatedList = kitsList.map { k ->
-                        if (k.kitId == kit.kitId) {
-                            k.copy(
-                                farmerId = id,
-                                farmerName = farmer,
-                                farmName = farm,
-                                lifecycleStatus = "Active"
+                    // Backend must succeed BEFORE any local state is touched.
+                    coroutineScope.launch {
+                        val api = authRepository.getAuthApi()
+                        if (api == null) {
+                            Toast.makeText(
+                                context,
+                                "Cannot assign: backend is unreachable. Check server URL in settings.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@launch
+                        }
+
+                        // Step 1 — POST to backend; Supabase must persist first
+                        try {
+                            val response = api.assignKit(
+                                AssignKitRequest(
+                                    deviceId = kit.gatewayId,
+                                    farmerProfileId = id
+                                )
                             )
-                        } else k
+
+                            if (response.status != "success") {
+                                // Backend rejected — do not touch local state
+                                val msg = response.message ?: "Unknown error from server"
+                                Log.e("AdminDashboard", "[ADMIN KIT ASSIGN] failed: $msg")
+                                Toast.makeText(
+                                    context,
+                                    "Assignment failed: $msg",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                return@launch
+                            }
+
+                            Log.d("AdminDashboard", "[ADMIN KIT ASSIGN] device=${kit.gatewayId} farmer=$id farm=$farm")
+                            Log.d("AdminDashboard", "[ADMIN KIT ASSIGN] success")
+
+                        } catch (e: Exception) {
+                            val msg = e.message ?: "Network error"
+                            Log.e("AdminDashboard", "[ADMIN KIT ASSIGN] failed: $msg")
+                            Toast.makeText(
+                                context,
+                                "Assignment failed: $msg",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            return@launch
+                        }
+
+                        // Step 2 — Backend succeeded; now update local Room/cache/UI
+                        val farmerProfile = farmerDao.getFarmerById(id)
+                        if (farmerProfile != null) {
+                            farmerDao.insert(
+                                farmerProfile.copy(
+                                    deviceId = kit.gatewayId,
+                                    deviceSerial = kit.serialNumber,
+                                    firmwareVersion = kit.firmwareVersion
+                                )
+                            )
+                        }
+
+                        val updatedList = kitsList.map { k ->
+                            if (k.kitId == kit.kitId) {
+                                k.copy(
+                                    farmerId = id,
+                                    farmerName = farmer,
+                                    farmName = farm,
+                                    lifecycleStatus = "Active"
+                                )
+                            } else k
+                        }
+                        kitsList = updatedList
+                        cacheManager.saveHardwareKits(updatedList)
+
+                        updateStats {
+                            it.copy(
+                                activeFarmers = it.activeFarmers + 1,
+                                activeFarms = it.activeFarms + 1,
+                                onlineDevices = it.onlineDevices + 1,
+                                offlineDevices = (it.offlineDevices - 1).coerceAtLeast(0)
+                            )
+                        }
+                        activeAssignKit = null
+                        Toast.makeText(
+                            context,
+                            "Kit ${kit.kitId} assigned to $farmer at $farm.",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
-                    kitsList = updatedList
-                    cacheManager.saveHardwareKits(updatedList)
-                    updateStats {
-                        it.copy(
-                            activeFarmers = it.activeFarmers + 1,
-                            activeFarms = it.activeFarms + 1,
-                            onlineDevices = it.onlineDevices + 1,
-                            offlineDevices = (it.offlineDevices - 1).coerceAtLeast(0)
-                        )
-                    }
-                    activeAssignKit = null
-                    Toast.makeText(context, "Kit ${kit.kitId} assigned to $farmer at $farm.", Toast.LENGTH_SHORT).show()
                 }
             )
         }
@@ -1635,6 +1625,18 @@ fun AdminDashboardScreen(
                     }
                     kitsList = updatedList
                     cacheManager.saveHardwareKits(updatedList)
+                    coroutineScope.launch {
+                        if (kit.farmerId.isNotEmpty()) {
+                            val farmerProfile = farmerDao.getFarmerById(kit.farmerId)
+                            if (farmerProfile != null) {
+                                val updatedProfile = farmerProfile.copy(
+                                    deviceId = newDeviceId,
+                                    deviceSerial = newSerial
+                                )
+                                farmerDao.insert(updatedProfile)
+                            }
+                        }
+                    }
                     activeReplaceKit = null
                     Toast.makeText(context, "Kit ${kit.kitId} hardware replaced with ESP32 node $newDeviceId.", Toast.LENGTH_SHORT).show()
                 }
@@ -1645,11 +1647,29 @@ fun AdminDashboardScreen(
         if (showAddFarmerDialog) {
             AddFarmerDialog(
                 onDismiss = { showAddFarmerDialog = false },
-                onAddFarmer = { newFarmer ->
+                onAddFarmer = { newFarmer, password ->
                     coroutineScope.launch {
-                        farmerDao.insert(newFarmer)
-                        showAddFarmerDialog = false
-                        Toast.makeText(context, "Successfully registered Farmer ${newFarmer.name}!", Toast.LENGTH_SHORT).show()
+                        val result = authRepository.register(
+                            name = newFarmer.name,
+                            email = newFarmer.email,
+                            password = password,
+                            role = com.poultryguard.ai.data.model.UserRole.FARMER,
+                            farmName = newFarmer.farmName,
+                            farmLocation = newFarmer.farmLocation,
+                            totalSheds = newFarmer.totalSheds,
+                            floorSpaceSqFt = newFarmer.floorSpaceSqFt
+                        )
+                        result.fold(
+                            onSuccess = { profile ->
+                                // Sync all farmers from backend to update local Room cache
+                                authRepository.syncAllFarmers()
+                                showAddFarmerDialog = false
+                                Toast.makeText(context, "Successfully registered Farmer ${profile.name}!", Toast.LENGTH_SHORT).show()
+                            },
+                            onFailure = { err ->
+                                Toast.makeText(context, "Registration failed: ${err.message}", Toast.LENGTH_LONG).show()
+                            }
+                        )
                     }
                 }
             )
@@ -1669,11 +1689,27 @@ fun AdminDashboardScreen(
         if (showAddVetDialog) {
             AddVetDialog(
                 onDismiss = { showAddVetDialog = false },
-                onAddVet = { newVet ->
+                onAddVet = { newVet, password ->
                     coroutineScope.launch {
-                        vetRepository.insert(newVet)
-                        showAddVetDialog = false
-                        Toast.makeText(context, "Successfully registered Veterinarian ${newVet.name}!", Toast.LENGTH_SHORT).show()
+                        val result = authRepository.register(
+                            name = newVet.name,
+                            email = newVet.email,
+                            password = password,
+                            role = com.poultryguard.ai.data.model.UserRole.VETERINARIAN,
+                            farmName = "",
+                            farmLocation = newVet.location
+                        )
+                        result.fold(
+                            onSuccess = { profile ->
+                                // Sync veterinarians from backend to update local Room cache
+                                vetRepository.syncVeterinarians()
+                                showAddVetDialog = false
+                                Toast.makeText(context, "Successfully registered Veterinarian ${profile.name}!", Toast.LENGTH_SHORT).show()
+                            },
+                            onFailure = { err ->
+                                Toast.makeText(context, "Registration failed: ${err.message}", Toast.LENGTH_LONG).show()
+                            }
+                        )
                     }
                 }
             )
@@ -1973,12 +2009,21 @@ fun SensorBadge(label: String, enabled: Boolean) {
 fun AddKitDialog(
     onDismiss: () -> Unit,
     onAddKit: (HardwareKit) -> Unit,
-    nextSuggestedId: String
+    nextSuggestedId: String,
+    authRepository: com.poultryguard.ai.data.repository.SupabaseAuthRepository,
+    coroutineScope: CoroutineScope,
+    context: android.content.Context
 ) {
     var kitId by remember { mutableStateOf(nextSuggestedId) }
     var deviceId by remember { mutableStateOf("ESP32-00" + nextSuggestedId.takeLast(2)) }
     var serialNumber by remember { mutableStateOf("PGESP0" + nextSuggestedId.takeLast(2)) }
     var firmwareVersion by remember { mutableStateOf("1.2.0") }
+
+    // ThingSpeak cloud telemetry credentials
+    var thingspeakChannelId by remember { mutableStateOf("") }
+    var thingspeakReadApiKey by remember { mutableStateOf("") }
+    var thingspeakWriteApiKey by remember { mutableStateOf("") }
+    var writeKeyVisible by remember { mutableStateOf(false) }
 
     // Sensors checkboxes
     var tempChecked by remember { mutableStateOf(true) }
@@ -1993,9 +2038,12 @@ fun AddKitDialog(
     var ammoniaSerial by remember { mutableStateOf("NH3-" + nextSuggestedId.takeLast(2)) }
     var soundSerial by remember { mutableStateOf("MIC-" + nextSuggestedId.takeLast(2)) }
     var cameraSerial by remember { mutableStateOf("CAM-" + nextSuggestedId.takeLast(2)) }
-    // Form fields
+
+    // API submission state
+    var isSubmitting by remember { mutableStateOf(false) }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.AddBox, contentDescription = "Add Kit", tint = GreenPrimary)
@@ -2008,7 +2056,7 @@ fun AddKitDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 400.dp)
+                    .heightIn(max = 480.dp)
                     .verticalScroll(scroll),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -2067,6 +2115,55 @@ fun AddKitDialog(
 
                 Divider(color = DividerColor, thickness = 1.dp, modifier = Modifier.padding(vertical = 4.dp))
 
+                // ThingSpeak telemetry credentials section
+                Text(
+                    text = "ThingSpeak Channel (Optional)",
+                    fontWeight = FontWeight.Bold,
+                    color = TextDark
+                )
+
+                OutlinedTextField(
+                    value = thingspeakChannelId,
+                    onValueChange = { thingspeakChannelId = it },
+                    label = { Text("Channel ID") },
+                    placeholder = { Text("e.g. 2345678") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = GreenPrimary)
+                )
+
+                OutlinedTextField(
+                    value = thingspeakReadApiKey,
+                    onValueChange = { thingspeakReadApiKey = it },
+                    label = { Text("Read API Key") },
+                    placeholder = { Text("Shared with farmer app") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = GreenPrimary)
+                )
+
+                OutlinedTextField(
+                    value = thingspeakWriteApiKey,
+                    onValueChange = { thingspeakWriteApiKey = it },
+                    label = { Text("Write API Key (server-side only)") },
+                    placeholder = { Text("Never exposed to farmer") },
+                    singleLine = true,
+                    visualTransformation = if (writeKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { writeKeyVisible = !writeKeyVisible }) {
+                            Icon(
+                                imageVector = if (writeKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (writeKeyVisible) "Hide" else "Show"
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = GreenPrimary)
+                )
+
+                Divider(color = DividerColor, thickness = 1.dp, modifier = Modifier.padding(vertical = 4.dp))
+
                 Text("Available Sensors Checklist", fontWeight = FontWeight.Bold, color = TextDark)
 
                 // Checkboxes
@@ -2080,6 +2177,7 @@ fun AddKitDialog(
         confirmButton = {
             Button(
                 colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                enabled = !isSubmitting,
                 onClick = {
                     if (kitId.isBlank() || deviceId.isBlank() || serialNumber.isBlank()) return@Button
                     val kit = HardwareKit(
@@ -2101,16 +2199,78 @@ fun AddKitDialog(
                         farmerName = "",
                         farmName = "",
                         lastCommunication = "Offline (Warehouse Inventory)",
-                        farmerId = ""
+                        farmerId = "",
+                        thingspeakChannelId = thingspeakChannelId.trim(),
+                        thingspeakReadApiKey = thingspeakReadApiKey.trim()
                     )
-                    onAddKit(kit)
+                    isSubmitting = true
+                    coroutineScope.launch {
+                        try {
+                            val api = authRepository.getAuthApi()
+                            if (api == null) {
+                                Toast.makeText(
+                                    context,
+                                    "Cannot register kit: backend is unreachable. Check server URL in settings.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                return@launch
+                            }
+
+                            val response = api.createKit(
+                                CreateKitRequest(
+                                    deviceId = deviceId.trim(),
+                                    name = "${kitId.trim()} ESP32 Controller",
+                                    kitId = kitId.trim(),
+                                    serialNumber = serialNumber.trim(),
+                                    firmwareVersion = firmwareVersion.trim(),
+                                    thingspeakChannelId = thingspeakChannelId.trim().ifBlank { null },
+                                    thingspeakReadApiKey = thingspeakReadApiKey.trim().ifBlank { null },
+                                    thingspeakWriteApiKey = thingspeakWriteApiKey.trim().ifBlank { null }
+                                )
+                            )
+
+                            if (response.status == "success") {
+                                Log.d("AdminDashboard", "Kit $deviceId registered in Supabase via API")
+                                onAddKit(kit)
+                            } else {
+                                // Backend explicitly rejected — do NOT save locally
+                                val msg = response.message ?: "Unknown error from server"
+                                Log.e("AdminDashboard", "createKit backend error: $msg")
+                                Toast.makeText(
+                                    context,
+                                    "Registration failed: $msg",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+
+                        } catch (e: Exception) {
+                            // Network or parsing failure — do NOT save locally
+                            val msg = e.message ?: "Network error"
+                            Log.e("AdminDashboard", "createKit API call failed: $msg")
+                            Toast.makeText(
+                                context,
+                                "Registration failed: $msg",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } finally {
+                            isSubmitting = false
+                        }
+                    }
                 }
             ) {
-                Text("Register Kit", color = Color.White)
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Register Kit", color = Color.White)
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = { if (!isSubmitting) onDismiss() }) {
                 Text("Cancel")
             }
         },
@@ -2611,10 +2771,11 @@ fun FarmerDetailDialog(
 @Composable
 fun AddFarmerDialog(
     onDismiss: () -> Unit,
-    onAddFarmer: (com.poultryguard.ai.data.model.FarmerProfile) -> Unit
+    onAddFarmer: (com.poultryguard.ai.data.model.FarmerProfile, String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var farmName by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
@@ -2642,6 +2803,7 @@ fun AddFarmerDialog(
             ) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("Email Address") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Account Password") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = phone, onValueChange = { phone = it }, label = { Text("Phone Number") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = farmName, onValueChange = { farmName = it }, label = { Text("Farm Name") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Farm Location") }, modifier = Modifier.fillMaxWidth())
@@ -2654,9 +2816,9 @@ fun AddFarmerDialog(
             Button(
                 colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
                 onClick = {
-                    if (name.isBlank() || email.isBlank() || farmName.isBlank()) return@Button
+                    if (name.isBlank() || email.isBlank() || farmName.isBlank() || password.isBlank()) return@Button
                     val farmer = com.poultryguard.ai.data.model.FarmerProfile(
-                        id = "farmer_" + System.currentTimeMillis(),
+                        id = "",
                         name = name,
                         email = email,
                         phone = phone,
@@ -2668,16 +2830,16 @@ fun AddFarmerDialog(
                         totalSheds = sheds.toIntOrNull() ?: 4,
                         floorSpaceSqFt = size.toIntOrNull() ?: 24000,
                         deviceId = deviceId.ifBlank { "Unassigned" },
-                        deviceSerial = "PGESP" + (1000..9999).random(),
-                        firmwareVersion = "1.2.0",
-                        activeBatchId = "BATCH-2026-" + (10..99).random() + "A",
-                        activeBatchStartDate = "2026-08-11",
-                        chickAgeDays = 1,
-                        feedConsumedKg = 10.0f,
+                        deviceSerial = "",
+                        firmwareVersion = "",
+                        activeBatchId = "",
+                        activeBatchStartDate = "",
+                        chickAgeDays = 0,
+                        feedConsumedKg = 0.0f,
                         mortalitiesCount = 0,
                         openDiseaseAlertsCount = 0
                     )
-                    onAddFarmer(farmer)
+                    onAddFarmer(farmer, password)
                 }
             ) {
                 Text("Register Farmer", color = Color.White)
@@ -2708,11 +2870,12 @@ fun DetailRow(label: String, value: String) {
 @Composable
 fun AddVetDialog(
     onDismiss: () -> Unit,
-    onAddVet: (com.poultryguard.ai.data.model.Veterinarian) -> Unit
+    onAddVet: (com.poultryguard.ai.data.model.Veterinarian, String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var specialty by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
     var licenseNumber by remember { mutableStateOf("") }
@@ -2740,6 +2903,7 @@ fun AddVetDialog(
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = specialty, onValueChange = { specialty = it }, label = { Text("Specialization (Specialty)") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("Email Address") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Account Password") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = phone, onValueChange = { phone = it }, label = { Text("Phone Number") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Location") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = licenseNumber, onValueChange = { licenseNumber = it }, label = { Text("License Number") }, modifier = Modifier.fillMaxWidth())
@@ -2751,9 +2915,9 @@ fun AddVetDialog(
             Button(
                 colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
                 onClick = {
-                    if (name.isBlank() || specialty.isBlank() || email.isBlank()) return@Button
+                    if (name.isBlank() || specialty.isBlank() || email.isBlank() || password.isBlank()) return@Button
                     val vet = com.poultryguard.ai.data.model.Veterinarian(
-                        id = "vet_" + System.currentTimeMillis(),
+                        id = "",
                         name = name,
                         specialty = specialty,
                         phone = phone,
@@ -2768,9 +2932,9 @@ fun AddVetDialog(
                         consultationHistory = "No consultation history recorded yet.",
                         licenseNumber = licenseNumber,
                         qualification = qualification,
-                        experience = experience
+                        experience = experience.toIntOrNull() ?: 0
                     )
-                    onAddVet(vet)
+                    onAddVet(vet, password)
                 }
             ) {
                 Text("Register Vet", color = Color.White)
@@ -2848,7 +3012,7 @@ fun VetDetailDialog(
                     Text("4. Verified Credentials & Experience", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
                     DetailRow("License Number", vet.licenseNumber.ifBlank { "Unspecified" })
                     DetailRow("Qualification", vet.qualification.ifBlank { "Unspecified" })
-                    DetailRow("Experience", vet.experience.ifBlank { "Unspecified" })
+                    DetailRow("Experience", if (vet.experience > 0) "${vet.experience} years" else "Unspecified")
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(vet.credentialsDetails, style = Typography.bodyMedium, color = TextDark)
                 }

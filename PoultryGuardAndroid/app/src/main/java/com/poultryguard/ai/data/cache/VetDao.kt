@@ -23,4 +23,21 @@ interface VetDao {
 
     @Query("SELECT COUNT(*) FROM veterinarians")
     suspend fun getCount(): Int
+
+    @Query("SELECT * FROM veterinarians WHERE email = :email LIMIT 1")
+    suspend fun getVetByEmail(email: String): Veterinarian?
+
+    @Query("UPDATE veterinarians SET phone = :phone, specialty = :specialty, location = :location, qualification = :qualification, licenseNumber = :licenseNumber, experience = :experience WHERE id = :id")
+    suspend fun updateProfile(
+        id: String,
+        phone: String,
+        specialty: String,
+        location: String,
+        qualification: String,
+        licenseNumber: String,
+        experience: Int
+    )
+
+    @Query("DELETE FROM veterinarians")
+    suspend fun deleteAll()
 }

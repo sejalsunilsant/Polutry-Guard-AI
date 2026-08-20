@@ -47,16 +47,22 @@ import com.poultryguard.ai.data.model.FarmEvent
 import com.poultryguard.ai.data.model.FarmEventType
 import com.poultryguard.ai.data.model.RecurrenceType
 import com.poultryguard.ai.data.model.MortalityRecord
+import com.poultryguard.ai.data.model.ageDays
 import com.poultryguard.ai.data.repository.MortalityRepository
 import com.poultryguard.ai.data.cache.CalendarReminderManager
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlertsScreen(
+    farmerName: String,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -74,9 +80,19 @@ fun AlertsScreen(
 
     val mortalityRepository = remember { MortalityRepository(context.applicationContext) }
     var mortalityRecords by remember { mutableStateOf<List<MortalityRecord>>(emptyList()) }
+    
+    val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(context.applicationContext) }
+    var veterinarians by remember { mutableStateOf<List<com.poultryguard.ai.data.model.Veterinarian>>(emptyList()) }
 
     LaunchedEffect(Unit) {
         cachedEvents = cacheManager.getCachedFarmEvents()
+    }
+    LaunchedEffect(Unit) {
+        vetRepository.getVeterinariansFlow().collect { vets ->
+            veterinarians = vets
+        }
+    }
+    LaunchedEffect(Unit) {
         mortalityRepository.getAllRecordsFlow().collect { records ->
             mortalityRecords = records
         }
@@ -104,43 +120,66 @@ fun AlertsScreen(
     var showReportDialog by remember { mutableStateOf(false) }
 
     fun generateBiosecurityReport(loggedDeaths: Int) {
-        val totalBirds = 12500
-        val survivalCount = totalBirds - loggedDeaths
-        val survivalRate = (survivalCount.toFloat() / totalBirds) * 100
+        val activeBatch = (uiState as? DashboardUiState.Success)?.activeBatch
+        val totalBirds = activeBatch?.initialCount ?: 0
+        val survivalCount = (totalBirds - loggedDeaths).coerceAtLeast(0)
+        val survivalRate = if (totalBirds > 0) (survivalCount.toFloat() / totalBirds) * 100 else 0.0f
 
-        val reportContent = """
-            # POULTRY GUARD AI - BIOSECURITY REPORT
-            =========================================
-            Generated Timestamp: 2026-05-31
-            Target Location: Shed #4 (Broilers - Day 18)
-            flock Owner: Farmer Joe Patterson
-            
-            ## 📊 Telemetry & Mortality Audit
-            -----------------------------------------
-            - Initial Flock Stock: $totalBirds broilers
-            - Logged Mortalities: $loggedDeaths deaths
-            - Active Surviving Flock: $survivalCount broilers
-            - Survival Rate Indicator: ${"%.2f%%".format(survivalRate)}
-            
-            ## 🌡️ Daily Environment Analytics
-            -----------------------------------------
-            - 1D Weekly Health Median: ${"%.2f%%".format(healthRates.average())}
-            - Peak Temperature Swings: 31.0 °C
-            - Peak Ammonia Gas Exposure: 25.5 ppm (WARNING threshold exceeded)
-            
-            ## 🧠 AI Diagnostic Insights & Action Plan
-            -----------------------------------------
-            [WARNING] Ammonia levels correlated with Temperature Swings indicate a critical biosecurity quadrant risk. High temperature limits broiler sweat dispersion and damp litter releases toxic gases.
-            
-            ### 🛠️ MANDATORY ACTION CHECKS:
-            1. **Ventilation:** Engage Exhaust Fans at 100% speed to displace ammonia gas build-up.
-            2. **litter Care:** Treat wet barn spaces immediately to check microbial gas decay.
-            3. **Cooling:** Enable Broiler Misters to combat thermal stress.
-            4. **Veterinarian Sweep:** Auto-notified Dr. Sarah Jenkins due to cumulative symptom logs.
-            
-            =========================================
-            [Poultry Guard AI Cryptographic Security Audit OK]
-        """.trimIndent()
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val dynamicShedName = activeBatch?.let { "${it.breed} - Day ${it.ageDays}" } ?: "No Active Batch"
+        
+        val successState = uiState as? DashboardUiState.Success
+        val currentTemp = successState?.sensorReadings?.find { it.id == "temperature" }?.value ?: 0f
+        val currentAmmonia = successState?.sensorReadings?.find { it.id == "ammonia" }?.value ?: 0f
+        
+        val assignedVet = veterinarians.firstOrNull { it.verificationStatus == "VERIFIED" }
+        val vetName = assignedVet?.name ?: "an assigned veterinarian"
+
+        val reportContent = if (activeBatch == null) {
+            """
+                # POULTRY GUARD AI - BIOSECURITY REPORT
+                =========================================
+                Generated Timestamp: $todayStr
+                flock Owner: Farmer $farmerName
+                
+                No active batch detected in the database. Please start a batch to generate environment reports.
+                =========================================
+            """.trimIndent()
+        } else {
+            """
+                # POULTRY GUARD AI - BIOSECURITY REPORT
+                =========================================
+                Generated Timestamp: $todayStr
+                Target Location: $dynamicShedName
+                flock Owner: Farmer $farmerName
+                
+                ## 📊 Telemetry & Mortality Audit
+                -----------------------------------------
+                - Initial Flock Stock: $totalBirds broilers
+                - Logged Mortalities: $loggedDeaths deaths
+                - Active Surviving Flock: $survivalCount broilers
+                - Survival Rate Indicator: ${"%.2f%%".format(survivalRate)}
+                
+                ## 🌡️ Daily Environment Analytics
+                -----------------------------------------
+                - 1D Weekly Health Median: ${if (survivalRate > 0) "%.2f%%".format(survivalRate) else "N/A"}
+                - Peak Temperature Swings: ${"%.1f".format(currentTemp)} °C
+                - Peak Ammonia Gas Exposure: ${"%.1f".format(currentAmmonia)} ppm ${if (currentAmmonia >= 16f) "(WARNING threshold exceeded)" else ""}
+                
+                ## 🧠 AI Diagnostic Insights & Action Plan
+                -----------------------------------------
+                [WARNING] Ammonia levels correlated with Temperature Swings indicate a critical biosecurity quadrant risk. High temperature limits broiler sweat dispersion and damp litter releases toxic gases.
+                
+                ### 🛠️ MANDATORY ACTION CHECKS:
+                1. **Ventilation:** Engage Exhaust Fans at 100% speed to displace ammonia gas build-up.
+                2. **litter Care:** Treat wet barn spaces immediately to check microbial gas decay.
+                3. **Cooling:** Enable Broiler Misters to combat thermal stress.
+                4. **Veterinarian Sweep:** Auto-notified $vetName due to cumulative symptom logs.
+                
+                =========================================
+                [Poultry Guard AI Cryptographic Security Audit OK]
+            """.trimIndent()
+        }
 
         // Persist/Export report inside workspace local directory (zero cost)
         try {
@@ -272,10 +311,6 @@ fun AlertsScreen(
                 )
             }
 
-            // Health Assistant Section
-            item {
-                HealthAssistantSection()
-            }
 
             // Interactive Farm Calendar Section
             item {
@@ -685,10 +720,13 @@ fun AlertsScreen(
 
             // Dynamic Diagnostic Summary Cards
             item {
-                val loggedDeaths = cacheManager.getCachedMortalities()
-                val total = 12500
-                val survival = total - loggedDeaths
-                val survivalRate = (survival.toFloat() / total) * 100
+                val activeBatch = (uiState as? DashboardUiState.Success)?.activeBatch
+                val total = activeBatch?.initialCount ?: 0
+                val loggedDeaths = activeBatch?.let { batch ->
+                    mortalityRecords.filter { it.batchId == batch.id }.sumOf { it.deathCount }
+                } ?: 0
+                val survival = (total - loggedDeaths).coerceAtLeast(0)
+                val survivalRate = if (total > 0) (survival.toFloat() / total) * 100 else 0.0f
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -727,12 +765,13 @@ fun AlertsScreen(
                                 )
                             }
                             Column {
-                                Text(text = "Peak Ammonia", fontSize = 11.sp, color = TextMedium)
+                                val currentAmmoniaVal = (uiState as? DashboardUiState.Success)?.sensorReadings?.find { it.id == "ammonia" }?.value ?: 0f
+                                Text(text = "Current Ammonia", fontSize = 11.sp, color = TextMedium)
                                 Text(
-                                    text = "25.5 ppm",
+                                    text = "${"%.1f".format(currentAmmoniaVal)} ppm",
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = AlertOrange
+                                    color = if (currentAmmoniaVal >= 25f) AlertRed else if (currentAmmoniaVal >= 16f) AlertOrange else GreenPrimary
                                 )
                             }
                         }
@@ -742,7 +781,10 @@ fun AlertsScreen(
 
             // Generate report card action
             item {
-                val loggedDeaths = cacheManager.getCachedMortalities()
+                val activeBatch = (uiState as? DashboardUiState.Success)?.activeBatch
+                val loggedDeaths = activeBatch?.let { batch ->
+                    mortalityRecords.filter { it.batchId == batch.id }.sumOf { it.deathCount }
+                } ?: 0
                 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -795,6 +837,25 @@ fun AlertsScreen(
                         }
                     }
                 }
+            }
+
+            // AI Health Guardian (ML Diagnostics) Card
+            item {
+                val cachedUser = remember { cacheManager.getCachedUserProfile() }
+                val farmId = cachedUser?.farmId ?: (uiState as? DashboardUiState.Success)?.activeBatch?.farmId ?: "farm_default"
+                val hardwareKits = remember { cacheManager.getHardwareKits() }
+                val activeKit = hardwareKits.find { it.isActive }
+                val deviceId = activeKit?.gatewayId ?: "ESP32-GATEWAY-DEFAULT"
+                val coroutineScope = rememberCoroutineScope()
+                val repo = remember { com.poultryguard.ai.data.api.DiseasePredictionRepository(context.applicationContext) }
+
+                GuardianMlDiagnosticsCard(
+                    context = context,
+                    deviceId = deviceId,
+                    farmId = farmId,
+                    coroutineScope = coroutineScope,
+                    repo = repo
+                )
             }
         }
     }
@@ -1098,8 +1159,37 @@ private fun isSameDayOfMonth(startStr: String, targetStr: String): Boolean {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HealthAssistantSection() {
+fun GuardianMlDiagnosticsCard(
+    context: android.content.Context,
+    deviceId: String,
+    farmId: String,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    repo: com.poultryguard.ai.data.api.DiseasePredictionRepository
+) {
+    var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var selectedSoundUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var isDiagnosing by remember { mutableStateOf(false) }
+    var diagnosisResult by remember { mutableStateOf<com.poultryguard.ai.data.api.GuardianPredictionResponse?>(null) }
+    var diagnosisError by remember { mutableStateOf<String?>(null) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        selectedImageUri = uri
+        diagnosisResult = null
+        diagnosisError = null
+    }
+
+    val soundPickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        selectedSoundUri = uri
+        diagnosisResult = null
+        diagnosisError = null
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -1107,130 +1197,350 @@ fun HealthAssistantSection() {
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(GreenPrimary.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SupportAgent,
-                        contentDescription = "AI Health Assistant",
-                        tint = GreenPrimary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "Health Assistant",
-                    style = Typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = TextDark
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.SupportAgent,
+                    contentDescription = "AI Health Guardian",
+                    tint = GreenPrimary,
+                    modifier = Modifier.size(24.dp)
                 )
-            }
-
-            // Disease Risk Alert Card (orange-tinted warning card)
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, AlertOrange.copy(alpha = 0.4f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "Warning",
-                        tint = AlertOrange,
-                        modifier = Modifier.size(24.dp)
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "AI Health Guardian",
+                        style = Typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextDark
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "AI Risk Alert: Medium Coccidiosis Probability",
-                            style = Typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = AlertOrange
-                        )
-                        Text(
-                            text = "Correlated Ammonia gas swings (19.0 ppm) and temperature spikes (27.8°C) recorded in Shed #4 indicate wet litter risk.",
-                            style = Typography.labelMedium,
-                            color = TextDark
-                        )
-                    }
+                    Text(
+                        text = "Multi-modal disease diagnosis using vision & sound ML models.",
+                        style = Typography.labelMedium,
+                        color = TextMedium
+                    )
                 }
             }
 
-            // Insights details
-            Text(
-                text = "Historical Insights & Analysis",
-                style = Typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextDark,
-                modifier = Modifier.padding(bottom = 6.dp)
-            )
-            Text(
-                text = "Over the last 30 days, your overall survival rate is high (99.91%). However, acoustic panic density indicators recorded a 5% raise in bird stress chirps during afternoon temperature peaks. Air quality indexes remained within safe margins except for transient ammonia spikes.",
-                style = Typography.bodyMedium,
-                color = TextMedium,
-                modifier = Modifier.padding(bottom = 16.dp),
-                lineHeight = 18.sp
-            )
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Recommendations
-            Text(
-                text = "Preventive Recommendations",
-                style = Typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextDark,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-
-            val recommendations = listOf(
-                "Engage exhaust fans at 100% capacity during heat hours (12:00 - 15:00) to clear transient ammonia gas.",
-                "Apply dry absorbent agents (e.g. agricultural lime/drying powder) to damp litter zones under the watering lines.",
-                "Distribute electrolyte-enhanced water booster packs to support birds during heat stress peaks."
-            )
-
-            recommendations.forEachIndexed { index, rec ->
-                Row(
-                    modifier = Modifier.padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.Top
+            // File selection row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Image Input Box
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Box(
                         modifier = Modifier
-                            .padding(top = 2.dp)
-                            .size(16.dp)
-                            .clip(CircleShape)
-                            .background(GreenPrimary),
+                            .fillMaxWidth()
+                            .height(100.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AppBackground)
+                            .border(androidx.compose.foundation.BorderStroke(1.dp, DividerColor))
+                            .clickable { imagePickerLauncher.launch("image/*") },
                         contentAlignment = Alignment.Center
                     ) {
+                        if (selectedImageUri != null) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Image Selected",
+                                    tint = GreenPrimary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Image Selected",
+                                    fontSize = 11.sp,
+                                    color = TextDark,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.Visibility,
+                                    contentDescription = "Pick Image",
+                                    tint = TextMedium,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Upload Image",
+                                    fontSize = 11.sp,
+                                    color = TextMedium
+                                )
+                            }
+                        }
+                    }
+                    if (selectedImageUri != null) {
                         Text(
-                            text = "${index + 1}",
-                            fontSize = 10.sp,
+                            text = "Change",
+                            fontSize = 11.sp,
+                            color = GreenPrimary,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            modifier = Modifier
+                                .clickable { imagePickerLauncher.launch("image/*") }
+                                .padding(top = 4.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+                }
+
+                // Sound Input Box
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AppBackground)
+                            .border(androidx.compose.foundation.BorderStroke(1.dp, DividerColor))
+                            .clickable { soundPickerLauncher.launch("audio/*") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (selectedSoundUri != null) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Sound Selected",
+                                    tint = GreenPrimary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Sound Selected",
+                                    fontSize = 11.sp,
+                                    color = TextDark,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.Assignment,
+                                    contentDescription = "Pick Sound",
+                                    tint = TextMedium,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Upload Sound",
+                                    fontSize = 11.sp,
+                                    color = TextMedium
+                                )
+                            }
+                        }
+                    }
+                    if (selectedSoundUri != null) {
+                        Text(
+                            text = "Change",
+                            fontSize = 11.sp,
+                            color = GreenPrimary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { soundPickerLauncher.launch("audio/*") }
+                                .padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Action Button
+            if (isDiagnosing) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = GreenPrimary)
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (selectedImageUri == null && selectedSoundUri == null) {
+                            Toast.makeText(context, "Please select at least an image or a sound file.", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        
+                        isDiagnosing = true
+                        coroutineScope.launch {
+                            val imagePart = selectedImageUri?.let { uriToMultipartBodyPart(context, it, "image") }
+                            val soundPart = selectedSoundUri?.let { uriToMultipartBodyPart(context, it, "sound") }
+                            
+                            val result = repo.predictGuardian(
+                                deviceId = deviceId,
+                                farmId = farmId,
+                                imagePart = imagePart,
+                                soundPart = soundPart
+                            )
+                            
+                            result.onSuccess { res ->
+                                diagnosisResult = res
+                                diagnosisError = null
+                                isDiagnosing = false
+                            }.onFailure { err ->
+                                diagnosisError = err.message ?: "An unknown diagnostic error occurred"
+                                diagnosisResult = null
+                                isDiagnosing = false
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = GreenPrimary,
+                        disabledContainerColor = GreenPrimary.copy(alpha = 0.5f)
+                    ),
+                    enabled = selectedImageUri != null || selectedSoundUri != null
+                ) {
                     Text(
-                        text = rec,
-                        style = Typography.bodyMedium,
-                        color = TextDark,
-                        modifier = Modifier.weight(1f)
+                        text = "Analyze Flock Health",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
                     )
                 }
+            }
+
+            // Diagnostic results display
+            if (diagnosisResult != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = DividerColor, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                val result = diagnosisResult!!
+                val badgeColor = when (result.riskLevel) {
+                    com.poultryguard.ai.data.api.DiseaseRiskLevel.HIGH -> AlertRed
+                    com.poultryguard.ai.data.api.DiseaseRiskLevel.MEDIUM -> AlertOrange
+                    else -> GreenPrimary
+                }
+                val badgeBg = badgeColor.copy(alpha = 0.1f)
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(badgeBg, shape = RoundedCornerShape(12.dp))
+                        .border(androidx.compose.foundation.BorderStroke(1.dp, badgeColor.copy(alpha = 0.2f)), RoundedCornerShape(12.dp))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "DIAGNOSTIC OUTCOME",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = badgeColor,
+                            letterSpacing = 1.sp
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(badgeColor)
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Risk: ${result.riskLevel.name}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Condition: ${result.condition} (${(result.confidence * 100).toInt()}% confidence)",
+                        style = Typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextDark
+                    )
+
+                    Text(
+                        text = result.recommendation,
+                        style = Typography.bodyMedium,
+                        color = TextDark.copy(alpha = 0.9f)
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Analyzed on: ${result.timestamp}",
+                        fontSize = 10.sp,
+                        color = TextMedium
+                    )
+                }
+            }
+
+            if (diagnosisError != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Diagnosis Error: ${diagnosisError!!}",
+                    color = AlertRed,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
             }
         }
     }
 }
+
+fun uriToMultipartBodyPart(
+    context: android.content.Context,
+    uri: android.net.Uri,
+    partName: String
+): okhttp3.MultipartBody.Part? {
+    try {
+        val contentResolver = context.contentResolver
+        val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+        val fileName = getFileName(context, uri) ?: "temp_file"
+        
+        val inputStream = contentResolver.openInputStream(uri) ?: return null
+        val bytes = inputStream.readBytes()
+        inputStream.close()
+        
+        val requestFile = bytes.toRequestBody(mimeType.toMediaTypeOrNull())
+        return okhttp3.MultipartBody.Part.createFormData(partName, fileName, requestFile)
+    } catch (e: Exception) {
+        e.printStackTrace()
+        return null
+    }
+}
+
+fun getFileName(context: android.content.Context, uri: android.net.Uri): String? {
+    var result: String? = null
+    if (uri.scheme == "content") {
+        val cursor = context.contentResolver.query(uri, null, null, null, null)
+        try {
+            if (cursor != null && cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (index != -1) {
+                    result = cursor.getString(index)
+                }
+            }
+        } finally {
+            cursor?.close()
+        }
+    }
+    if (result == null) {
+        result = uri.path
+        val cut = result?.lastIndexOf('/') ?: -1
+        if (cut != -1) {
+            result = result?.substring(cut + 1)
+        }
+    }
+    return result
+}
+

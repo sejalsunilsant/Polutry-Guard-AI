@@ -15,6 +15,7 @@ android {
         properties.load(propertiesFile.inputStream())
     }
     val groqApiKey = properties.getProperty("groq.api.key") ?: "\"\""
+    val googleMapsKey = properties.getProperty("google.maps.key") ?: "\"\""
     defaultConfig {
         applicationId = "com.poultryguard.ai"
         minSdk = 26
@@ -27,6 +28,7 @@ android {
             useSupportLibrary = true
         }
         buildConfigField("String", "GROQ_API_KEY", groqApiKey)
+        buildConfigField("String", "GOOGLE_MAPS_KEY", googleMapsKey)
     }
 
     buildTypes {

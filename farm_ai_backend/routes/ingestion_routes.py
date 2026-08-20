@@ -164,3 +164,47 @@ def configure_device_thingspeak():
     except Exception as e:
         print(f"[Ingestion API] Exception in configure_device_thingspeak: {e}")
         return jsonify({'error': f"Internal server error: {str(e)}"}), 500
+
+
+@ingestion_bp.route('/api/v1/device/configure-wifi', methods=['POST'])
+def configure_device_wifi():
+    """
+    Endpoint for a farmer to upload and save Wi-Fi configuration details in the database.
+    Requires Authorization: Bearer <JWT>
+    """
+    try:
+        from data.supabase_client import verify_token_and_get_user, save_device_wifi_config
+        
+        # 1. Authorize user using JWT
+        auth_header = request.headers.get("Authorization")
+        user_info, auth_error = verify_token_and_get_user(auth_header)
+        if auth_error:
+            return jsonify({'error': auth_error}), 401
+            
+        data = request.get_json() or {}
+        device_id = (data.get('deviceId') or data.get('device_id') or '').strip()
+        ssid = (data.get('ssid') or '').strip()
+        password = data.get('password')
+        
+        if not device_id:
+            return jsonify({'error': 'deviceId is a required field'}), 400
+        if not ssid:
+            return jsonify({'error': 'ssid is a required field'}), 400
+        if password is None:
+            return jsonify({'error': 'password is a required field'}), 400
+            
+        # 2. Save Wi-Fi config (verifies ownership/assignment under the hood)
+        res = save_device_wifi_config(device_id, ssid, password, user_info['uid'])
+        
+        if res.get('status') == 'error':
+            return jsonify({'error': res.get('message')}), 400
+            
+        return jsonify({
+            'status': 'success',
+            'message': 'Wi-Fi configuration saved'
+        }), 200
+        
+    except Exception as e:
+        print(f"[Ingestion API] Exception in configure_device_wifi: {e}")
+        return jsonify({'error': f"Internal server error: {str(e)}"}), 500
+

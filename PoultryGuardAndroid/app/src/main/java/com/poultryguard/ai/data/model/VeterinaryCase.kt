@@ -14,6 +14,8 @@ data class VeterinaryCase(
     val status: String = "PENDING", // 'PENDING', 'ASSIGNED', 'DIAGNOSED', 'RESOLVED'
     val diagnosis: String? = null,
     val recommendation: String? = null,
+    val treatment: String? = null,
+    val followUpInstructions: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

@@ -3,6 +3,29 @@ import uuid
 import time
 # pyrefly: ignore [missing-import]
 from supabase import create_client, Client
+from cryptography.fernet import Fernet
+
+# Initialize Fernet encryption for Wi-Fi credentials
+_wifi_fernet = None
+_encryption_key = os.environ.get("WIFI_ENCRYPTION_KEY")
+if not _encryption_key:
+    print("[Supabase Client] WARNING: WIFI_ENCRYPTION_KEY is missing. Generating a temporary key for testing...")
+    _encryption_key = Fernet.generate_key().decode()
+    
+try:
+    _wifi_fernet = Fernet(_encryption_key.encode())
+except Exception as e:
+    print(f"[Supabase Client] Error initializing Fernet: {e}")
+
+def encrypt_wifi_password(password: str) -> str:
+    if not _wifi_fernet:
+        raise ValueError("Fernet encryption is not initialized.")
+    return _wifi_fernet.encrypt(password.encode()).decode()
+
+def decrypt_wifi_password(encrypted_password: str) -> str:
+    if not _wifi_fernet:
+        raise ValueError("Fernet encryption is not initialized.")
+    return _wifi_fernet.decrypt(encrypted_password.encode()).decode()
 
 # Load environment variables manually from .env if not loaded yet (useful for tests and scripts)
 if not os.environ.get("SUPABASE_URL") or not os.environ.get("SUPABASE_KEY"):
@@ -56,6 +79,36 @@ class SupabaseProxy:
 
 supabase = SupabaseProxy()
 _mock_batches = {}
+_mock_veterinarians = {
+    "vet_1": {
+        "id": "vet_1",
+        "name": "Dr. Ramesh Kumar",
+        "specialty": "Avian Pathology",
+        "phone": "+919876543210",
+        "email": "ramesh@poultryguard.ai",
+        "location": "Ludhiana, Punjab",
+        "verification_status": "VERIFIED",
+        "availability": "Available",
+        "photo_url": "https://randomuser.me/api/portraits/men/32.jpg",
+        "license_number": "VET-IND-2021-9981",
+        "qualification": "M.V.Sc (Avian Medicine)",
+        "experience": 8
+    },
+    "vet_2": {
+        "id": "vet_2",
+        "name": "Dr. Priya Patel",
+        "specialty": "Poultry Nutrition",
+        "phone": "+918765432109",
+        "email": "priya@poultryguard.ai",
+        "location": "Anand, Gujarat",
+        "verification_status": "VERIFIED",
+        "availability": "Available",
+        "photo_url": "https://randomuser.me/api/portraits/women/44.jpg",
+        "license_number": "VET-IND-2018-4521",
+        "qualification": "Ph.D. in Poultry Science",
+        "experience": 12
+    }
+}
 
 if not (url and key and url != "your_supabase_url" and key != "your_supabase_anon_key"):
     print("[Supabase] WARNING: SUPABASE_URL or SUPABASE_KEY missing or unconfigured. Running in local fallback mode.")
@@ -512,13 +565,36 @@ def record_mortality(batch_id, death_count):
         return {"status": "error", "message": str(e)}
 
 
-def sync_user_profile(uid, name, email, role, farm_name=None, farm_location=None, phone=None):
+def sync_user_profile(uid, name, email, role, farm_name=None, farm_location=None, phone=None,
+                      specialty=None, location=None, photo_url=None, license_number=None, qualification=None, experience=None):
     """
     Synchronizes user profile, farm, and members to Supabase.
     """
     if not supabase:
         print(f"[Supabase Fallback] Profile sync fallback for '{email}' (role: {role}).")
-        return {"status": "fallback", "profile_id": None}
+        if role == "VETERINARIAN":
+            exp_val = None
+            if experience is not None:
+                try:
+                    exp_val = int(experience)
+                except ValueError:
+                    exp_val = None
+            _mock_veterinarians[uid] = {
+                "id": uid,
+                "name": name,
+                "email": email,
+                "role": role,
+                "phone": phone or "",
+                "specialty": specialty or "Avian Medicine",
+                "location": location or farm_location or "Unspecified District",
+                "photo_url": photo_url or "",
+                "license_number": license_number or "",
+                "qualification": qualification or "",
+                "experience": exp_val,
+                "verification_status": "PENDING",
+                "availability": "Available"
+            }
+        return {"status": "fallback", "profile_id": uid}
     
     try:
         # Convert Firebase UID or simulated UID deterministically to a valid UUID format
@@ -580,16 +656,27 @@ def sync_user_profile(uid, name, email, role, farm_name=None, farm_location=None
                 
         # 3. If role is VETERINARIAN, sync Veterinarians table
         elif role == "VETERINARIAN":
+            exp_val = None
+            if experience is not None:
+                try:
+                    exp_val = int(experience)
+                except ValueError:
+                    exp_val = None
+
             vet_res = supabase.table("veterinarians").select("id").eq("id", uid).execute()
             vet_data = {
                 "id": uid,
                 "name": name,
-                "specialty": "Avian Medicine",
+                "specialty": specialty or "Avian Medicine",
                 "phone": phone or "",
                 "email": email,
-                "location": farm_location or "Unspecified District",
+                "location": location or farm_location or "Unspecified District",
                 "verification_status": "PENDING",
-                "availability": "Available"
+                "availability": "Available",
+                "photo_url": photo_url or "",
+                "license_number": license_number or "",
+                "qualification": qualification or "",
+                "experience": exp_val
             }
             if not vet_res.data:
                 supabase.table("veterinarians").insert(vet_data).execute()
@@ -598,7 +685,12 @@ def sync_user_profile(uid, name, email, role, farm_name=None, farm_location=None
                 supabase.table("veterinarians").update({
                     "name": name,
                     "phone": phone or "",
-                    "location": farm_location or "Unspecified District"
+                    "location": location or farm_location or "Unspecified District",
+                    "specialty": specialty or "Avian Medicine",
+                    "photo_url": photo_url or "",
+                    "license_number": license_number or "",
+                    "qualification": qualification or "",
+                    "experience": exp_val
                 }).eq("id", uid).execute()
                 print(f"[Supabase] Updated veterinarian: {email}")
                 
@@ -608,7 +700,8 @@ def sync_user_profile(uid, name, email, role, farm_name=None, farm_location=None
         return {"status": "error", "message": str(e)}
 
 
-def supabase_register_user(name, email, password, role, farm_name=None, farm_location=None, total_sheds=4, floor_space_sq_ft=24000):
+def supabase_register_user(name, email, password, role, farm_name=None, farm_location=None, total_sheds=4, floor_space_sq_ft=24000,
+                           specialty=None, phone=None, location=None, photo_url=None, license_number=None, qualification=None, experience=None):
     """
     Registers a new user in Supabase Auth and populates the matching profiles/farms/veterinarians tables.
     """
@@ -616,6 +709,48 @@ def supabase_register_user(name, email, password, role, farm_name=None, farm_loc
         # Simulated fallback mode
         uid = f"sim_{int(time.time() * 1000)}"
         profile_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, uid))
+        if role == "VETERINARIAN":
+            exp_val = None
+            if experience is not None:
+                try:
+                    exp_val = int(experience)
+                except ValueError:
+                    exp_val = None
+            vet_obj = {
+                "id": profile_uuid,
+                "name": name,
+                "email": email,
+                "role": role,
+                "phone": phone or "",
+                "specialty": specialty or "Avian Medicine",
+                "location": location or farm_location or "Unspecified District",
+                "photo_url": photo_url or "",
+                "license_number": license_number or "",
+                "qualification": qualification or "",
+                "experience": exp_val,
+                "verification_status": "PENDING",
+                "availability": "Available"
+            }
+            _mock_veterinarians[profile_uuid] = vet_obj
+            return {
+                "status": "success",
+                "data": {
+                    "uid": profile_uuid,
+                    "name": name,
+                    "email": email,
+                    "role": role,
+                    "phone": phone or "",
+                    "specialty": specialty or "Avian Medicine",
+                    "location": location or farm_location or "Unspecified District",
+                    "photoUrl": photo_url or "",
+                    "licenseNumber": license_number or "",
+                    "qualification": qualification or "",
+                    "experience": exp_val,
+                    "joinDate": "Just now",
+                    "approvalStatus": "APPROVED",
+                    "token": f"mock_token_for_{profile_uuid}"
+                }
+            }
         return {
             "status": "success",
             "data": {
@@ -625,7 +760,8 @@ def supabase_register_user(name, email, password, role, farm_name=None, farm_loc
                 "role": role,
                 "farmName": farm_name or "Greenfield Broilers",
                 "joinDate": "Just now",
-                "approvalStatus": "PENDING_APPROVAL" if role == "FARMER" else "APPROVED"
+                "approvalStatus": "PENDING_APPROVAL" if role == "FARMER" else "APPROVED",
+                "token": f"mock_token_for_{profile_uuid}"
             }
         }
     
@@ -676,28 +812,57 @@ def supabase_register_user(name, email, password, role, farm_name=None, farm_loc
             
         # 4. If VETERINARIAN, create vet record
         elif role == "VETERINARIAN":
+            exp_val = None
+            if experience is not None:
+                try:
+                    exp_val = int(experience)
+                except ValueError:
+                    exp_val = None
             supabase.table("veterinarians").insert({
                 "id": user_uuid,
                 "name": name,
-                "specialty": "Avian Medicine",
-                "phone": "",
+                "specialty": specialty or "Avian Medicine",
+                "phone": phone or "",
                 "email": email,
-                "location": farm_location or "Unspecified District",
+                "location": location or farm_location or "Unspecified District",
                 "verification_status": "PENDING",
-                "availability": "Available"
+                "availability": "Available",
+                "photo_url": photo_url or "",
+                "license_number": license_number or "",
+                "qualification": qualification or "",
+                "experience": exp_val
             }).execute()
             
+        # Get access token from session if available
+        access_token = None
+        if hasattr(res, "session") and res.session:
+            access_token = res.session.access_token
+
+        ret_data = {
+            "uid": user_uuid,
+            "name": name,
+            "email": email,
+            "role": role,
+            "joinDate": "Just now",
+            "approvalStatus": "PENDING_APPROVAL" if role == "FARMER" else "APPROVED",
+            "token": access_token
+        }
+        if role == "VETERINARIAN":
+            ret_data.update({
+                "phone": phone or "",
+                "specialty": specialty or "Avian Medicine",
+                "location": location or farm_location or "Unspecified District",
+                "photoUrl": photo_url or "",
+                "licenseNumber": license_number or "",
+                "qualification": qualification or "",
+                "experience": exp_val
+            })
+        else:
+            ret_data["farmName"] = farm_name or "Greenfield Broilers"
+
         return {
             "status": "success",
-            "data": {
-                "uid": user_uuid,
-                "name": name,
-                "email": email,
-                "role": role,
-                "farmName": farm_name or "Greenfield Broilers",
-                "joinDate": "Just now",
-                "approvalStatus": "PENDING_APPROVAL" if role == "FARMER" else "APPROVED"
-            }
+            "data": ret_data
         }
     except Exception as e:
         print(f"[Supabase Register Error] {e}")
@@ -737,17 +902,19 @@ def supabase_login_user(email, password):
                 "code": "REJECTED"
             }
             
+        sim_uid = f"sim_user_{int(time.time() * 1000)}"
         return {
             "status": "success",
             "data": {
-                "uid": f"sim_user_{int(time.time() * 1000)}",
+                "uid": sim_uid,
                 "name": email.split('@')[0].capitalize(),
                 "email": email,
                 "role": detected_role,
                 "farmName": "Greenfield Broilers",
                 "joinDate": "Just now",
                 "approvalStatus": sim_status,
-                "rejectionReason": sim_reason
+                "rejectionReason": sim_reason,
+                "token": f"mock_token_for_{sim_uid}"
             }
         }
         
@@ -794,6 +961,11 @@ def supabase_login_user(email, password):
             if farm_res.data:
                 farm_name = farm_res.data[0].get("name", farm_name)
                 
+        # Get access token from session if available
+        access_token = None
+        if hasattr(res, "session") and res.session:
+            access_token = res.session.access_token
+
         return {
             "status": "success",
             "data": {
@@ -804,7 +976,8 @@ def supabase_login_user(email, password):
                 "farmName": farm_name,
                 "joinDate": profile.get("join_date", "Just now"),
                 "approvalStatus": approval_status,
-                "rejectionReason": rejection_reason
+                "rejectionReason": rejection_reason,
+                "token": access_token
             }
         }
     except Exception as e:
@@ -1105,4 +1278,375 @@ def safe_cleanup_telemetry(device_id, date_str, start_time, end_time):
         return False
 
 
+def get_all_farmers():
+    """
+    Fetch all farmer profiles from Supabase.
+    """
+    if not supabase:
+        return []
+    try:
+        res = supabase.table("profiles")\
+            .select("*, farm_members(farm_id, farms(name))")\
+            .eq("role", "FARMER")\
+            .execute()
+        return res.data or []
+    except Exception as e:
+        print(f"[Supabase Error] Failed to fetch all farmers: {e}")
+        return []
 
+
+def get_all_veterinarians():
+    """
+    Fetch all veterinarian profiles from Supabase.
+    """
+    if not supabase:
+        return list(_mock_veterinarians.values())
+    try:
+        res = supabase.table("veterinarians").select("*").execute()
+        return res.data or []
+    except Exception as e:
+        print(f"[Supabase Error] Failed to fetch all veterinarians: {e}")
+        return []
+
+def create_device_kit(
+    device_id: str,
+    name: str,
+    kit_id: str = "",
+    serial_number: str = "",
+    firmware_version: str = "",
+    thingspeak_channel_id: str = None,
+    thingspeak_read_api_key: str = None,
+    thingspeak_write_api_key: str = None
+):
+    """
+    Creates a new IoT device kit entry in the `device_kits` table.
+    This table has no farm_id constraint, so kits can be pre-registered
+    in warehouse inventory before being assigned to a farm.
+
+    When the admin assigns the kit via assign_device_to_farm(), a corresponding
+    row is created in `devices` with farm_id set.
+
+    The thingspeak_write_api_key is stored server-side only and never returned
+    to farmer-facing API endpoints.
+    """
+    if not supabase:
+        print(f"[Supabase Fallback] create_device_kit called for '{device_id}' in fallback mode.")
+        return {"status": "fallback", "data": {"id": device_id}}
+    try:
+        # Check if kit already exists in device_kits
+        existing = supabase.table("device_kits").select("id").eq("id", device_id).execute()
+        if existing.data:
+            return {"status": "error", "message": f"Device kit '{device_id}' already exists."}
+
+        kit_data = {
+            "id": device_id,
+            "status": "Available",
+        }
+        # Store extra metadata in columns if they exist (migrations may add them)
+        # We attempt upsert; if a column is missing Supabase will error and we catch it below
+        extras = {}
+        if name:
+            extras["name"] = name
+        if kit_id:
+            extras["kit_id"] = kit_id
+        if serial_number:
+            extras["serial_number"] = serial_number
+        if firmware_version:
+            extras["firmware_version"] = firmware_version
+        if thingspeak_channel_id:
+            extras["thingspeak_channel_id"] = thingspeak_channel_id
+        if thingspeak_read_api_key:
+            extras["thingspeak_read_api_key"] = thingspeak_read_api_key
+        if thingspeak_write_api_key:
+            extras["thingspeak_write_api_key"] = thingspeak_write_api_key
+
+        # Try with extras first; fall back to base row only if extras cause a column error
+        try:
+            res = supabase.table("device_kits").insert({**kit_data, **extras}).execute()
+        except Exception as extra_err:
+            if "PGRST204" in str(extra_err) or "column" in str(extra_err).lower():
+                print(f"[Supabase] device_kits missing extended columns; inserting base row: {extra_err}")
+                res = supabase.table("device_kits").insert(kit_data).execute()
+            else:
+                raise extra_err
+
+        row = res.data[0] if res.data else {**kit_data, **extras}
+        # Always return kit_id and name in the response dict for the admin UI
+        row.setdefault("kit_id", kit_id)
+        row.setdefault("name", name)
+        return {"status": "success", "data": row}
+    except Exception as e:
+        print(f"[Supabase Error] create_device_kit failed for '{device_id}': {e}")
+        return {"status": "error", "message": str(e)}
+
+
+def assign_device_to_farm(device_id: str, farmer_profile_id: str):
+    """
+    Assigns a device to a farmer's farm.
+
+    Flow:
+    1. Verify kit exists in device_kits and is Available (not already assigned).
+    2. Verify farmer profile exists and is APPROVED.
+    3. Resolve farm_id from farm_members (source of truth — never trust Android).
+    4. Ensure farm exists in farms table (create if needed).
+    5. Create row in devices (id=device_id, farm_id=farm_id) OR update if exists.
+    6. Mark device_kits.status = 'Active'.
+    7. Auto-create farm_settings row if missing.
+    """
+    if not supabase:
+        print(f"[Supabase Fallback] assign_device_to_farm called in fallback mode.")
+        return {"status": "fallback", "deviceId": device_id, "farmerProfileId": farmer_profile_id}
+    try:
+        # 1. Verify kit exists in device_kits
+        kit_res = supabase.table("device_kits").select("id, status").eq("id", device_id).execute()
+        if not kit_res.data:
+            # Also check if it already exists as a provisioned device in devices table
+            dev_check = supabase.table("devices").select("id, farm_id").eq("id", device_id).execute()
+            if not dev_check.data:
+                return {"status": "error", "message": f"Device kit '{device_id}' not found. Register it first via POST /admin/kits."}
+            # Already a provisioned device
+            existing_farm = dev_check.data[0].get("farm_id")
+            if existing_farm:
+                return {
+                    "status": "error",
+                    "message": f"Device '{device_id}' is already assigned to farm '{existing_farm}'. Unassign it first."
+                }
+        else:
+            kit = kit_res.data[0]
+            if kit.get("status") == "Active":
+                return {
+                    "status": "error",
+                    "message": f"Device kit '{device_id}' is already assigned (status=Active). Unassign it first."
+                }
+
+        # 2. Verify farmer profile
+        profile_res = supabase.table("profiles").select("id, name, approval_status").eq("id", farmer_profile_id).execute()
+        if not profile_res.data:
+            return {"status": "error", "message": f"Farmer profile '{farmer_profile_id}' not found."}
+        profile = profile_res.data[0]
+        if profile.get("approval_status") != "APPROVED":
+            return {
+                "status": "error",
+                "message": f"Farmer '{profile.get('name')}' is not yet approved (status: {profile.get('approval_status')})."
+            }
+
+        # 3. Resolve farm_id from farm_members (authoritative — never trust Android-provided farm_id)
+        member_res = supabase.table("farm_members").select("farm_id").eq("profile_id", farmer_profile_id).execute()
+        if not member_res.data:
+            return {"status": "error", "message": f"No farm membership found for profile '{farmer_profile_id}'. Farmer may not have a farm yet."}
+        farm_id = member_res.data[0].get("farm_id")
+
+        # 4. Ensure farm exists
+        farm_res = supabase.table("farms").select("id").eq("id", farm_id).execute()
+        if not farm_res.data:
+            return {"status": "error", "message": f"Farm '{farm_id}' not found in farms table."}
+
+        # 5. Get ThingSpeak credentials from device_kits row (may or may not have extra columns)
+        thingspeak_channel_id = None
+        thingspeak_read_api_key = None
+        thingspeak_write_api_key = None
+        try:
+            kit_full_res = supabase.table("device_kits").select(
+                "id, status, thingspeak_channel_id, thingspeak_read_api_key, thingspeak_write_api_key, name"
+            ).eq("id", device_id).execute()
+            if kit_full_res.data:
+                kit_full = kit_full_res.data[0]
+                thingspeak_channel_id = kit_full.get("thingspeak_channel_id")
+                thingspeak_read_api_key = kit_full.get("thingspeak_read_api_key")
+                thingspeak_write_api_key = kit_full.get("thingspeak_write_api_key")
+                kit_name = kit_full.get("name") or f"ESP32 Controller ({device_id})"
+        except Exception:
+            kit_name = f"ESP32 Controller ({device_id})"
+
+        # 6. Upsert into devices table (create provisioned device row with farm_id)
+        device_row = {
+            "id": device_id,
+            "farm_id": farm_id,
+            "name": kit_name if 'kit_name' in dir() else f"ESP32 Controller ({device_id})",
+        }
+        if thingspeak_channel_id:
+            device_row["thingspeak_channel_id"] = thingspeak_channel_id
+        if thingspeak_read_api_key:
+            device_row["thingspeak_read_api_key"] = thingspeak_read_api_key
+        # thingspeak_write_api_key only stored if column exists in devices
+
+        # Check if device row already exists in devices table
+        dev_existing = supabase.table("devices").select("id").eq("id", device_id).execute()
+        if dev_existing.data:
+            # Update farm_id
+            supabase.table("devices").update({"farm_id": farm_id}).eq("id", device_id).execute()
+        else:
+            supabase.table("devices").insert(device_row).execute()
+
+        # 7. Mark device_kits.status = 'Active'
+        try:
+            supabase.table("device_kits").update({"status": "Active"}).eq("id", device_id).execute()
+        except Exception:
+            pass  # device_kits row may not exist if device was pre-existing
+
+        # 8. Ensure farm_settings row exists
+        settings_res = supabase.table("farm_settings").select("device_id").eq("device_id", device_id).execute()
+        if not settings_res.data:
+            supabase.table("farm_settings").insert({
+                "device_id": device_id,
+                "vent_temp": 26.0,
+                "heater_temp": 20.0,
+                "lights_on_hour": 6,
+                "lights_off_hour": 20,
+                "sprinkler_threshold": 29.5,
+                "sms_alerts_enabled": True,
+                "recipient_phone": ""
+            }).execute()
+            print(f"[Supabase] Auto-created farm_settings for device '{device_id}'")
+
+        return {
+            "status": "success",
+            "data": {
+                "deviceId": device_id,
+                "farmId": farm_id,
+                "farmerProfileId": farmer_profile_id,
+                "farmerName": profile.get("name")
+            }
+        }
+    except Exception as e:
+        print(f"[Supabase Error] assign_device_to_farm failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+def get_all_kits():
+    """
+    Fetches all registered device kits from Supabase for the admin panel.
+    Reads from device_kits (pre-assigned inventory) and merges with devices
+    (provisioned/assigned) to give a complete view.
+    thingspeak_write_api_key is NEVER returned.
+    """
+    if not supabase:
+        return []
+    try:
+        # Fetch pre-registered kits (not yet assigned to a farm)
+        kit_res = supabase.table("device_kits").select("id, status, registered_at").execute()
+        kits_raw = kit_res.data or []
+
+        # Fetch provisioned devices (assigned to a farm)
+        dev_res = supabase.table("devices").select(
+            "id, name, farm_id, thingspeak_channel_id, last_seen_at, created_at"
+        ).execute()
+        devices_raw = dev_res.data or []
+        devices_by_id = {d["id"]: d for d in devices_raw}
+
+        # Merge: device_kits entries enriched with devices data where available
+        result = []
+        seen = set()
+        for kit in kits_raw:
+            dev = devices_by_id.get(kit["id"], {})
+            merged = {
+                "id": kit["id"],
+                "name": dev.get("name") or kit.get("id"),
+                "farm_id": dev.get("farm_id"),
+                "thingspeak_channel_id": dev.get("thingspeak_channel_id"),
+                "last_seen_at": dev.get("last_seen_at"),
+                "created_at": dev.get("created_at") or kit.get("registered_at"),
+                "lifecycle_status": kit.get("status", "Available"),
+            }
+            result.append(merged)
+            seen.add(kit["id"])
+
+        # Also include devices that were provisioned without going through device_kits
+        for dev in devices_raw:
+            if dev["id"] not in seen:
+                result.append({
+                    "id": dev["id"],
+                    "name": dev.get("name"),
+                    "farm_id": dev.get("farm_id"),
+                    "thingspeak_channel_id": dev.get("thingspeak_channel_id"),
+                    "last_seen_at": dev.get("last_seen_at"),
+                    "created_at": dev.get("created_at"),
+                    "lifecycle_status": "Active" if dev.get("farm_id") else "Available",
+                })
+
+        return result
+    except Exception as e:
+        print(f"[Supabase Error] get_all_kits failed: {e}")
+        return []
+
+
+def verify_token_and_get_user(auth_header: str):
+    """
+    Verifies the JWT token from the Authorization header and returns user metadata.
+    """
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None, "Missing or invalid authorization header"
+        
+    token = auth_header.split(" ", 1)[1].strip()
+    
+    # Handle local mock testing tokens
+    if token.startswith("mock_token_for_"):
+        uid = token.replace("mock_token_for_", "")
+        return {"uid": uid, "role": "FARMER"}, None
+        
+    if not supabase:
+        return None, "Backend is running in offline fallback mode. Cannot verify JWT."
+        
+    try:
+        user_res = supabase.auth.get_user(token)
+        if not user_res or not user_res.user:
+            return None, "Invalid or expired authorization token"
+            
+        user_uuid = user_res.user.id
+        
+        # Query database to retrieve user's role
+        profile_res = supabase.table("profiles").select("role").eq("id", user_uuid).execute()
+        role = "FARMER"
+        if profile_res.data:
+            role = profile_res.data[0].get("role", "FARMER")
+            
+        return {"uid": user_uuid, "role": role}, None
+    except Exception as e:
+        print(f"[Supabase JWT Verification Error] {e}")
+        return None, f"Token validation failed: {str(e)}"
+
+
+def save_device_wifi_config(device_id: str, ssid: str, password: str, farmer_id: str):
+    """
+    Saves Wi-Fi configuration details to the database in an encrypted format.
+    Validates that the farmer actually owns/is assigned this device.
+    """
+    if not supabase:
+        return {"status": "error", "message": "Database client not configured. Cannot save Wi-Fi configuration."}
+        
+    try:
+        # 1. Resolve farm_id from farm_members for this farmer_id
+        member_res = supabase.table("farm_members").select("farm_id").eq("profile_id", farmer_id).execute()
+        if not member_res.data:
+            return {"status": "error", "message": f"Unauthorized: No farm membership associated with profile '{farmer_id}'."}
+        farm_id = member_res.data[0].get("farm_id")
+        
+        # 2. Verify that the device is registered and assigned to this farm
+        device_res = supabase.table("devices").select("farm_id").eq("id", device_id).execute()
+        if not device_res.data:
+            return {"status": "error", "message": f"Device '{device_id}' is not registered."}
+        
+        assigned_farm_id = device_res.data[0].get("farm_id")
+        if assigned_farm_id != farm_id:
+            return {"status": "error", "message": f"Unauthorized: Device '{device_id}' is not assigned to your farm."}
+            
+        # 3. Encrypt the Wi-Fi password
+        encrypted_pwd = encrypt_wifi_password(password)
+        
+        # 4. Upsert Wi-Fi configuration into device_wifi_configs
+        wifi_data = {
+            "device_id": device_id,
+            "wifi_ssid": ssid,
+            "encrypted_wifi_password": encrypted_pwd,
+            "updated_at": "now()"
+        }
+        
+        res = supabase.table("device_wifi_configs").upsert(wifi_data).execute()
+        
+        return {
+            "status": "success",
+            "message": "Wi-Fi configuration saved"
+        }
+    except Exception as e:
+        print(f"[Supabase Error] save_device_wifi_config failed: {e}")
+        return {"status": "error", "message": str(e)}

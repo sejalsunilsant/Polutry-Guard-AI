@@ -6,15 +6,15 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "system_stats")
 data class SystemStats(
     @PrimaryKey val id: Int = 1,
-    val totalFarmers: Int = 124,
-    val activeFarmers: Int = 98,
-    val totalFarms: Int = 112,
-    val activeFarms: Int = 88,
-    val totalDevices: Int = 117,
-    val onlineDevices: Int = 89,
-    val offlineDevices: Int = 12,
-    val registeredVets: Int = 15,
-    val activeVets: Int = 11,
-    val openDiseaseAlerts: Int = 7,
-    val pendingSupportRequests: Int = 3
+    val totalFarmers: Int = 0,
+    val activeFarmers: Int = 0,
+    val totalFarms: Int = 0,
+    val activeFarms: Int = 0,
+    val totalDevices: Int = 0,
+    val onlineDevices: Int = 0,
+    val offlineDevices: Int = 0,
+    val registeredVets: Int = 0,
+    val activeVets: Int = 0,
+    val openDiseaseAlerts: Int = 0,
+    val pendingSupportRequests: Int = 0
 )

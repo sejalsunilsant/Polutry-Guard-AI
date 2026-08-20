@@ -56,12 +56,12 @@ def start_poultry_batch(farm_id):
 def get_active_poultry_batch(farm_id):
     try:
         active_batch = get_active_batch(farm_id)
-        if not active_batch:
-            return jsonify({'message': f"No active batch found for farm '{farm_id}'."}), 404
-            
+        # Return 200 with null data when no active batch exists.
+        # 404 is semantically incorrect here — the route exists; the batch simply hasn't started yet.
+        # The Android BatchRepository handles data=null as "no active batch" gracefully.
         return jsonify({
             'status': 'success',
-            'data': active_batch
+            'data': active_batch  # None serialises to JSON null
         }), 200
 
     except Exception as e:

@@ -3,7 +3,7 @@ package com.poultryguard.ai.data.model
 data class SensorReading(
     val id: String,
     val name: String,
-    val value: Float,
+    val value: Float?,
     val unit: String,
     val status: SensorStatus,
     val timestamp: String,
