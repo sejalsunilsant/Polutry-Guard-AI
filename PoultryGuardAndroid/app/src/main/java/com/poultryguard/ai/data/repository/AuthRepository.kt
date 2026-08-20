@@ -25,7 +25,14 @@ interface AuthRepository {
         farmName: String = "",
         farmLocation: String = "",
         totalSheds: Int = 4,
-        floorSpaceSqFt: Int = 24000
+        floorSpaceSqFt: Int = 24000,
+        phone: String = "",
+        specialty: String = "",
+        location: String = "",
+        photoUrl: String = "",
+        licenseNumber: String = "",
+        qualification: String = "",
+        experience: Int = 0
     ): Result<UserProfile>
     suspend fun forgotPassword(email: String): Result<Unit>
     suspend fun logout(): Result<Unit>
@@ -35,6 +42,7 @@ interface AuthRepository {
     suspend fun reviewFarmer(profileId: String, action: String, rejectionReason: String? = null): Result<Unit>
     suspend fun syncAllFarmers(): Result<Unit>
     suspend fun fetchUserContext(profileId: String): Result<com.poultryguard.ai.data.api.UserContextDto>
+    suspend fun configureWifi(deviceId: String, ssid: String, password: String): Result<Unit>
 }
 
 class SupabaseAuthRepository(private val context: Context) : AuthRepository {
@@ -114,7 +122,14 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
         farmName: String,
         farmLocation: String,
         totalSheds: Int,
-        floorSpaceSqFt: Int
+        floorSpaceSqFt: Int,
+        phone: String,
+        specialty: String,
+        location: String,
+        photoUrl: String,
+        licenseNumber: String,
+        qualification: String,
+        experience: Int
     ): Result<UserProfile> = withContext(Dispatchers.IO) {
         try {
             val api = getApi()
@@ -127,7 +142,14 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                     farmName = farmName,
                     farmLocation = farmLocation,
                     totalSheds = totalSheds,
-                    floorSpaceSqFt = floorSpaceSqFt
+                    floorSpaceSqFt = floorSpaceSqFt,
+                    phone = phone,
+                    specialty = specialty,
+                    location = location,
+                    photoUrl = photoUrl,
+                    licenseNumber = licenseNumber,
+                    qualification = qualification,
+                    experience = experience
                 )
             )
             if (response.status == "success" && response.data != null) {
@@ -309,6 +331,7 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                             isProvisioned = true,
                             isActive = true,
                             lifecycleStatus = "Active",
+                            ssid = dto.wifiSsid ?: matchedKit.ssid,
                             thingspeakChannelId = dto.thingspeakChannelId ?: matchedKit.thingspeakChannelId,
                             thingspeakReadApiKey = dto.thingspeakReadApiKey ?: matchedKit.thingspeakReadApiKey
                         ) ?: com.poultryguard.ai.data.model.HardwareKit(
@@ -320,6 +343,7 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                             isProvisioned = true,
                             isActive = true,
                             lifecycleStatus = "Active",
+                            ssid = dto.wifiSsid ?: "",
                             thingspeakChannelId = dto.thingspeakChannelId ?: "",
                             thingspeakReadApiKey = dto.thingspeakReadApiKey ?: ""
                         )
@@ -345,19 +369,41 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                     val newVet = com.poultryguard.ai.data.model.Veterinarian(
                         id = dto.profileId,
                         name = dto.name,
-                        specialty = existing?.specialty ?: "Avian Medicine",
-                        phone = dto.thingspeakChannelId ?: existing?.phone ?: "",
+                        specialty = dto.specialty ?: existing?.specialty ?: "Avian Medicine",
+                        phone = dto.phone ?: existing?.phone ?: "",
                         email = dto.email,
-                        location = existing?.location ?: "",
-                        photoUrl = existing?.photoUrl ?: "",
+                        location = dto.location ?: existing?.location ?: "",
+                        photoUrl = dto.photoUrl ?: existing?.photoUrl ?: "",
                         availability = existing?.availability ?: "Available",
-                        verificationStatus = existing?.verificationStatus ?: "VERIFIED"
+                        verificationStatus = existing?.verificationStatus ?: "VERIFIED",
+                        licenseNumber = dto.licenseNumber ?: existing?.licenseNumber ?: "",
+                        qualification = dto.qualification ?: existing?.qualification ?: "",
+                        experience = dto.experience ?: existing?.experience ?: 0
                     )
                     db.vetDao().insert(newVet)
                 }
                 Result.success(dto)
             } else {
                 Result.failure(Exception("Failed to fetch context from backend."))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun configureWifi(deviceId: String, ssid: String, password: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val api = getApi()
+            val cachedUser = cacheManager.getCachedUserProfile()
+            val token = cachedUser?.token ?: ""
+            val response = api.configureWifi(
+                token = "Bearer $token",
+                body = com.poultryguard.ai.data.api.ConfigureWifiRequest(deviceId, ssid, password)
+            )
+            if (response.status == "success") {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception(response.message))
             }
         } catch (e: Exception) {
             Result.failure(e)

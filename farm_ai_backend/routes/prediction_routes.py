@@ -356,3 +356,264 @@ def predict_sound_endpoint():
     except Exception as e:
         print(f"[Prediction API] Sound prediction error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+def upload_media_bytes(file_bytes, bucket_name, folder, file_name):
+    """
+    Uploads raw file bytes to Supabase Storage and returns the public URL.
+    """
+    from data.supabase_client import supabase
+    if not supabase:
+        print(f"[Supabase Storage Fallback] Mock upload for file bytes: {file_name}")
+        return f"https://mock-supabase.co/storage/v1/object/public/{bucket_name}/{folder}/{file_name}"
+    try:
+        # Ensure bucket exists
+        try:
+            supabase.storage.get_bucket(bucket_name)
+        except Exception:
+            try:
+                supabase.storage.create_bucket(bucket_name, {"public": True})
+            except Exception as ce:
+                print(f"[Supabase Storage Warning] Could not create bucket: {ce}")
+                
+        path_in_bucket = f"{folder}/{file_name}"
+        supabase.storage.from_(bucket_name).upload(
+            path=path_in_bucket,
+            file=file_bytes,
+            file_options={"cache-control": "3600", "upsert": "true"}
+        )
+        public_url = supabase.storage.from_(bucket_name).get_public_url(path_in_bucket)
+        return public_url
+    except Exception as e:
+        print(f"[Supabase Storage Error] Failed to upload media: {e}")
+        return None
+
+
+@prediction_bp.route('/api/v1/guardian/predict', methods=['POST'])
+def guardian_predict_endpoint():
+    try:
+        import time
+        import datetime
+        
+        device_id = request.form.get('deviceId') or request.form.get('device_id')
+        farm_id = request.form.get('farmId') or request.form.get('farm_id')
+        
+        if not device_id or not farm_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'deviceId and farmId are required form parameters'
+            }), 400
+
+        image_file = request.files.get('image')
+        sound_file = request.files.get('sound')
+
+        if not image_file and not sound_file:
+            return jsonify({
+                'status': 'error',
+                'message': 'At least one input (image or sound) is required'
+            }), 400
+
+        # Upload and Predict Image
+        image_url = None
+        image_pred = None
+        if image_file:
+            # Read bytes for storage upload
+            image_bytes = image_file.read()
+            image_file.seek(0)
+            
+            # Save and run prediction model
+            img_array = preprocess_image(image_file, target_size=(224, 224))
+            image_pred = ModelManager.predict_image(img_array)
+            
+            # Upload to Supabase Storage
+            ts_str = int(time.time())
+            filename = f"guardian_{device_id}_{ts_str}.jpg"
+            image_url = upload_media_bytes(image_bytes, "poultry-media", "images", filename)
+
+        # Upload and Predict Sound
+        sound_url = None
+        sound_pred = None
+        if sound_file:
+            # Read bytes for storage upload
+            sound_bytes = sound_file.read()
+            sound_file.seek(0)
+            
+            # Save file to a temporary location for librosa processing
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
+                temp_path = temp_file.name
+                sound_file.save(temp_path)
+            
+            try:
+                waveform, sr = preprocess_audio(temp_path)
+                if is_valid_sound_clip(waveform, sr):
+                    mel = librosa.feature.melspectrogram(y=waveform, sr=sr, n_mels=128)
+                    log_mel = librosa.power_to_db(mel)
+                    if log_mel.shape[1] < 173:
+                        pad = 173 - log_mel.shape[1]
+                        log_mel = np.pad(log_mel, ((0, 0), (0, pad)))
+                    else:
+                        log_mel = log_mel[:, :173]
+                    sound_pred = ModelManager.predict_sound(log_mel)
+            except Exception as se:
+                print(f"[Prediction API] Sound preprocessing failed: {se}")
+            finally:
+                # Cleanup temp sound file
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+            
+            # Upload to Supabase Storage
+            ts_str = int(time.time())
+            filename = f"guardian_{device_id}_{ts_str}.wav"
+            sound_url = upload_media_bytes(sound_bytes, "poultry-media", "audio", filename)
+
+        # Retrieve Telemetry Environment Context (Prior)
+        from data.supabase_client import get_last_telemetry, save_telemetry
+        telemetry_record = get_last_telemetry(device_id)
+        if telemetry_record:
+            temp = float(telemetry_record.get('temperature', 24.0))
+            humid = float(telemetry_record.get('humidity', 60.0))
+            ammonia = float(telemetry_record.get('ammonia', 10.0))
+            sound_level = float(telemetry_record.get('sound_level', 50.0))
+        else:
+            temp = 24.0
+            humid = 60.0
+            ammonia = 10.0
+            sound_level = 50.0
+
+        # Save sensor telemetry to database referencing the newly uploaded image/sound URLs
+        tel_res = save_telemetry(
+            device_id=device_id,
+            temperature=temp,
+            humidity=humid,
+            ammonia=ammonia,
+            sound_level=sound_level,
+            farm_id=farm_id,
+            sound_url=sound_url,
+            image_url=image_url
+        )
+        telemetry_id = None
+        if tel_res.get("status") == "success" and tel_res.get("data"):
+            telemetry_id = tel_res["data"][0].get("id")
+
+        # Get Environmental Sensor Prior Prediction
+        sensor_pred = ModelManager.predict_sensor([temp, humid, ammonia])
+
+        # Fuse visual, acoustic, and environmental sensors
+        from ml.fusion.decision_engine import fuse_decisions
+        fused_disease, confidence, prob_map = fuse_decisions(
+            temp=temp,
+            hum=humid,
+            ammonia=ammonia,
+            sensor_pred=sensor_pred,
+            sound_pred=sound_pred,
+            image_pred=image_pred
+        )
+
+        # Map risk level
+        if fused_disease == "Healthy":
+            risk_level = "LOW"
+        elif confidence >= 0.70:
+            risk_level = "HIGH"
+        else:
+            risk_level = "MEDIUM"
+            
+        if ammonia >= 25.0:
+            risk_level = "HIGH"
+
+        # Generate biosecurity recommendations
+        if ammonia >= 25.0:
+            recommendation = f"CRITICAL AMMONIA ALERT: Air quality is hazardous ({ammonia} ppm). Exhaust ventilation fans must run at 100% capacity to flush the house and prevent permanent respiratory tract burns."
+        elif fused_disease == "Newcastle":
+            recommendation = f"NEWCASTLE DISEASE WARNING: High risk of Newcastle infection ({int(confidence * 100)}% confidence). Acoustic/visual metrics show gasping and abnormal posture. Quarantine affected birds and contact your vet immediately."
+        elif fused_disease == "Avian Influenza":
+            recommendation = f"AVIAN INFLUENZA WARNING: High risk of Avian Influenza ({int(confidence * 100)}% confidence). Visual monitors show extreme lethargy and abnormal appearance. Alert biosecurity officers and isolate the flock."
+        elif fused_disease == "Coccidiosis":
+            recommendation = f"COCCIDIOSIS DETECTED: Elevated risk of digestive infection ({int(confidence * 100)}% confidence). Visual cues show huddling/lying. Ensure composted litter is dry, feed is dry, and treat with coccidiostats."
+        elif fused_disease == "Fowlpox":
+            recommendation = f"FOWLPOX ALERT: High risk of Fowlpox infection ({int(confidence * 100)}% confidence). Visual check reveals possible comb/wattle lesions. Isolate symptomatic birds, control mosquitos, and apply antiseptic."
+        elif fused_disease == "Infectious Bronchitis":
+            recommendation = f"INFECTIOUS BRONCHITIS ALERT: High risk of IB respiratory infection ({int(confidence * 100)}% confidence). Detected heavy coughing/gasping. Stabilize shed temperature and mist disinfectant to suppress aerosol transmission."
+        else:
+            recommendation = "LOW DISEASE RISK: Environment parameters (Temp, Humidity, Ammonia) and flock behavior (sound, visual movement) are all within ideal comfort zones."
+
+        # Handle abnormal disease event creation
+        is_abnormal = (risk_level in ["MEDIUM", "HIGH"]) and (fused_disease != "Healthy")
+        event_id = None
+        
+        from data.supabase_client import get_active_batch, supabase
+        active_batch = get_active_batch(farm_id)
+        batch_id = active_batch.get("id") if active_batch else None
+        
+        if is_abnormal and supabase:
+            from data.supabase_client import find_matching_active_event, create_disease_event, update_disease_event
+            matching_event = find_matching_active_event(device_id, fused_disease)
+            
+            if matching_event:
+                updated_event = update_disease_event(
+                    event=matching_event,
+                    new_confidence=confidence,
+                    new_image_url=image_url,
+                    new_sound_url=sound_url
+                )
+                if updated_event:
+                    event_id = updated_event["id"]
+            else:
+                new_event = create_disease_event(
+                    device_id=device_id,
+                    batch_id=batch_id,
+                    disease=fused_disease,
+                    risk_level=risk_level,
+                    confidence=confidence,
+                    image_url=image_url,
+                    sound_url=sound_url
+                )
+                if new_event:
+                    event_id = new_event["id"]
+
+        # Log prediction to Supabase PostgreSQL database
+        from data.supabase_client import save_prediction
+        saved_pred_id = None
+        pred_res = save_prediction(
+            device_id=device_id,
+            disease=fused_disease,
+            risk_level=risk_level,
+            confidence=confidence,
+            recommendation=recommendation,
+            farm_id=farm_id,
+            telemetry_id=telemetry_id,
+            event_id=event_id
+        )
+        if pred_res.get("status") == "success" and pred_res.get("data"):
+            saved_pred_id = pred_res["data"][0].get("id")
+
+        # Create alert for abnormal predictions
+        if is_abnormal and saved_pred_id and supabase:
+            from data.supabase_client import create_alert
+            alert_title = f"Disease Alert: {fused_disease} ({risk_level})"
+            create_alert(
+                batch_id=batch_id,
+                device_id=device_id,
+                prediction_id=saved_pred_id,
+                title=alert_title,
+                description=recommendation,
+                severity=risk_level
+            )
+
+        timestamp_str = datetime.datetime.utcnow().isoformat() + "Z"
+        
+        return jsonify({
+            "status": "success",
+            "condition": fused_disease,
+            "riskLevel": risk_level,
+            "confidence": float(confidence),
+            "recommendation": recommendation,
+            "imageUrl": image_url,
+            "soundUrl": sound_url,
+            "timestamp": timestamp_str
+        }), 200
+    except Exception as e:
+        print(f"[Prediction API] Guardian prediction error: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+

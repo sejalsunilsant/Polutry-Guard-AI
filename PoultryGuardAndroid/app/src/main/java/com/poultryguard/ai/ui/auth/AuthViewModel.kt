@@ -98,10 +98,19 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         email: String,
         password: String,
         role: UserRole,
+        // Farm Info:
         farmName: String = "",
         farmLocation: String = "",
         totalSheds: Int = 4,
-        floorSpaceSqFt: Int = 24000
+        floorSpaceSqFt: Int = 24000,
+        // Veterinarian Info:
+        phone: String = "",
+        location: String = "",
+        photoUrl: String = "",
+        specialty: String = "",
+        qualification: String = "",
+        licenseNumber: String = "",
+        experience: Int = 0
     ) {
         if (name.isBlank() || email.isBlank() || password.isBlank()) {
             _uiState.value = AuthUiState.Error("All fields are required.")
@@ -117,7 +126,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 farmName = farmName,
                 farmLocation = farmLocation,
                 totalSheds = totalSheds,
-                floorSpaceSqFt = floorSpaceSqFt
+                floorSpaceSqFt = floorSpaceSqFt,
+                phone = phone,
+                specialty = specialty,
+                location = location,
+                photoUrl = photoUrl,
+                licenseNumber = licenseNumber,
+                qualification = qualification,
+                experience = experience
             )
             result.fold(
                 onSuccess = { userProfile ->
@@ -151,13 +167,16 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                             val newVet = com.poultryguard.ai.data.model.Veterinarian(
                                 id = userProfile.uid.ifBlank { "vet_" + System.currentTimeMillis() },
                                 name = name,
-                                specialty = "",
-                                phone = "",
+                                specialty = specialty,
+                                phone = phone,
                                 email = email,
-                                location = "",
-                                photoUrl = "",
+                                location = location,
+                                photoUrl = photoUrl,
                                 availability = "Available",
-                                verificationStatus = "PENDING"
+                                verificationStatus = "PENDING",
+                                licenseNumber = licenseNumber,
+                                qualification = qualification,
+                                experience = experience
                             )
                             db.vetDao().insert(newVet)
                         }

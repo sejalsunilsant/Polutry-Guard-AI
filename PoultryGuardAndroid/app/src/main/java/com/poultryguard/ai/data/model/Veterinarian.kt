@@ -22,5 +22,5 @@ data class Veterinarian(
     // Additional requested fields
     val licenseNumber: String = "",
     val qualification: String = "",
-    val experience: String = ""
+    val experience: Int = 0
 )

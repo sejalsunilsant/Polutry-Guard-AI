@@ -17,6 +17,11 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -55,8 +60,159 @@ fun RegisterScreen(
     var totalSheds by remember { mutableStateOf("") }
     var floorSpace by remember { mutableStateOf("") }
 
+    // Veterinarian fields
+    var phone by remember { mutableStateOf("") }
+    var location by remember { mutableStateOf("") }
+    var photoUrl by remember { mutableStateOf("") }
+    var specialty by remember { mutableStateOf("") }
+    var qualification by remember { mutableStateOf("") }
+    var licenseNumber by remember { mutableStateOf("") }
+    var experience by remember { mutableStateOf("") }
+
+    // Field-level Error States
+    var nameError by remember { mutableStateOf<String?>(null) }
+    var emailError by remember { mutableStateOf<String?>(null) }
+    var phoneError by remember { mutableStateOf<String?>(null) }
+    var locationError by remember { mutableStateOf<String?>(null) }
+    var specialtyError by remember { mutableStateOf<String?>(null) }
+    var qualificationError by remember { mutableStateOf<String?>(null) }
+    var licenseError by remember { mutableStateOf<String?>(null) }
+    var experienceError by remember { mutableStateOf<String?>(null) }
+    var passwordError by remember { mutableStateOf<String?>(null) }
+    var confirmPasswordError by remember { mutableStateOf<String?>(null) }
+    
+    // Farmer-specific field errors
+    var farmNameError by remember { mutableStateOf<String?>(null) }
+    var farmLocationError by remember { mutableStateOf<String?>(null) }
+    var totalShedsError by remember { mutableStateOf<String?>(null) }
+    var floorSpaceError by remember { mutableStateOf<String?>(null) }
+
     var validationError by remember { mutableStateOf<String?>(null) }
     val scrollState = rememberScrollState()
+
+    fun validateInputs(): Boolean {
+        var isValid = true
+        
+        nameError = null
+        emailError = null
+        phoneError = null
+        locationError = null
+        specialtyError = null
+        qualificationError = null
+        licenseError = null
+        experienceError = null
+        passwordError = null
+        confirmPasswordError = null
+        farmNameError = null
+        farmLocationError = null
+        totalShedsError = null
+        floorSpaceError = null
+        validationError = null
+
+        // Name Validation
+        if (name.isBlank()) {
+            nameError = "Full Name is required."
+            isValid = false
+        }
+
+        // Email Validation
+        val emailPattern = android.util.Patterns.EMAIL_ADDRESS
+        if (email.isBlank()) {
+            emailError = "Email Address is required."
+            isValid = false
+        } else if (!emailPattern.matcher(email.trim()).matches()) {
+            emailError = "Please enter a valid email address."
+            isValid = false
+        }
+
+        // Password Validation
+        if (password.isEmpty()) {
+            passwordError = "Password is required."
+            isValid = false
+        } else if (password.length < 6) {
+            passwordError = "Password must be at least 6 characters."
+            isValid = false
+        }
+
+        // Confirm Password Validation
+        if (confirmPassword.isEmpty()) {
+            confirmPasswordError = "Please confirm your password."
+            isValid = false
+        } else if (password != confirmPassword) {
+            confirmPasswordError = "Passwords do not match."
+            isValid = false
+        }
+
+        // Role Specific Validation
+        if (selectedRole == UserRole.FARMER) {
+            if (farmName.isBlank()) {
+                farmNameError = "Farm Name is required."
+                isValid = false
+            }
+            if (farmLocation.isBlank()) {
+                farmLocationError = "Farm Location is required."
+                isValid = false
+            }
+            if (totalSheds.isNotBlank() && totalSheds.toIntOrNull() == null) {
+                totalShedsError = "Sheds count must be an integer number."
+                isValid = false
+            }
+            if (floorSpace.isNotBlank() && floorSpace.toIntOrNull() == null) {
+                floorSpaceError = "Floor space must be an integer number."
+                isValid = false
+            }
+        } else if (selectedRole == UserRole.VETERINARIAN) {
+            // Phone Validation (Indian phone format validation)
+            val cleanPhone = phone.trim().replace("\\s".toRegex(), "")
+            val indianPhoneRegex = Regex("^(\\+91)?[6-9]\\d{9}$")
+            if (phone.isBlank()) {
+                phoneError = "Phone Number is required."
+                isValid = false
+            } else if (!indianPhoneRegex.matches(cleanPhone)) {
+                phoneError = "Please enter a valid Indian phone number."
+                isValid = false
+            }
+
+            // Location
+            if (location.isBlank()) {
+                locationError = "Location / City is required."
+                isValid = false
+            }
+
+            // Specialty
+            if (specialty.isBlank()) {
+                specialtyError = "Specialty is required."
+                isValid = false
+            }
+
+            // Qualification
+            if (qualification.isBlank()) {
+                qualificationError = "Qualification is required."
+                isValid = false
+            }
+
+            // License Number
+            if (licenseNumber.isBlank()) {
+                licenseError = "Veterinary License Number is required."
+                isValid = false
+            }
+
+            // Experience
+            val expInt = experience.toIntOrNull()
+            if (experience.isBlank()) {
+                experienceError = "Years of Experience is required."
+                isValid = false
+            } else if (expInt == null || expInt < 0) {
+                experienceError = "Experience must be a positive integer number of years."
+                isValid = false
+            }
+        }
+
+        if (!isValid) {
+            validationError = "Please correct the highlighted errors."
+        }
+        return isValid
+    }
 
     Scaffold(containerColor = AppBackground) { innerPadding ->
         Box(
@@ -103,38 +259,7 @@ fun RegisterScreen(
                         modifier = Modifier.padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        // Full Name
-                        OutlinedTextField(
-                            value = name,
-                            onValueChange = { name = it },
-                            label = { Text("Full Name") },
-                            leadingIcon = { Icon(Icons.Default.Person, contentDescription = "Name", tint = GreenPrimary) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = GreenPrimary,
-                                focusedLabelColor = GreenPrimary
-                            )
-                        )
-
-                        // Email
-                        OutlinedTextField(
-                            value = email,
-                            onValueChange = { email = it },
-                            label = { Text("Email Address") },
-                            leadingIcon = { Icon(Icons.Default.Email, contentDescription = "Email", tint = GreenPrimary) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = GreenPrimary,
-                                focusedLabelColor = GreenPrimary
-                            )
-                        )
-
-                        // Role Selector Dropdown
+                        // Role Selector Dropdown (changes layout structure dynamically)
                         ExposedDropdownMenuBox(
                             expanded = dropdownExpanded,
                             onExpandedChange = { dropdownExpanded = !dropdownExpanded }
@@ -169,6 +294,7 @@ fun RegisterScreen(
                                     onClick = {
                                         selectedRole = UserRole.FARMER
                                         dropdownExpanded = false
+                                        validationError = null
                                     }
                                 )
                                 DropdownMenuItem(
@@ -176,116 +302,307 @@ fun RegisterScreen(
                                     onClick = {
                                         selectedRole = UserRole.VETERINARIAN
                                         dropdownExpanded = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Admin (System Superintendent)") },
-                                    onClick = {
-                                        selectedRole = UserRole.ADMIN
-                                        dropdownExpanded = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Super Admin (Full System Control)") },
-                                    onClick = {
-                                        selectedRole = UserRole.SUPER_ADMIN
-                                        dropdownExpanded = false
+                                        validationError = null
                                     }
                                 )
                             }
                         }
 
-                        // Dynamic Farm Information Inputs for Farmers
-                        AnimatedVisibility(visible = selectedRole == UserRole.FARMER) {
-                            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                                OutlinedTextField(
-                                    value = farmName,
-                                    onValueChange = { farmName = it },
-                                    label = { Text("Farm Name") },
-                                    leadingIcon = { Icon(Icons.Default.Home, contentDescription = "Farm Name", tint = GreenPrimary) },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = GreenPrimary,
-                                        focusedLabelColor = GreenPrimary
-                                    )
-                                )
-                                OutlinedTextField(
-                                    value = farmLocation,
-                                    onValueChange = { farmLocation = it },
-                                    label = { Text("Farm Location") },
-                                    leadingIcon = { Icon(Icons.Default.Place, contentDescription = "Location", tint = GreenPrimary) },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = GreenPrimary,
-                                        focusedLabelColor = GreenPrimary
-                                    )
-                                )
-                                OutlinedTextField(
-                                    value = totalSheds,
-                                    onValueChange = { totalSheds = it },
-                                    label = { Text("Total Sheds / Barns") },
-                                    leadingIcon = { Icon(Icons.Default.Apps, contentDescription = "Sheds", tint = GreenPrimary) },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = GreenPrimary,
-                                        focusedLabelColor = GreenPrimary
-                                    )
-                                )
-                                OutlinedTextField(
-                                    value = floorSpace,
-                                    onValueChange = { floorSpace = it },
-                                    label = { Text("Floor Space (Sq. Ft.)") },
-                                    leadingIcon = { Icon(Icons.Default.Crop, contentDescription = "Floor Space", tint = GreenPrimary) },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = GreenPrimary,
-                                        focusedLabelColor = GreenPrimary
-                                    )
-                                )
-                            }
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        if (selectedRole == UserRole.FARMER) {
+                            // 1. Account Details Section
+                            Text(
+                                text = "1. Account Information",
+                                style = Typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = GreenPrimary
+                            )
+                            
+                            // Full Name
+                            OutlinedTextField(
+                                value = name,
+                                onValueChange = { name = it; nameError = null },
+                                label = { Text("Full Name") },
+                                isError = nameError != null,
+                                supportingText = nameError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Person, contentDescription = "Name", tint = GreenPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            // Email
+                            OutlinedTextField(
+                                value = email,
+                                onValueChange = { email = it; emailError = null },
+                                label = { Text("Email Address") },
+                                isError = emailError != null,
+                                supportingText = emailError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Email, contentDescription = "Email", tint = GreenPrimary) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            // Password
+                            OutlinedTextField(
+                                value = password,
+                                onValueChange = { password = it; passwordError = null },
+                                label = { Text("Password (min 6 chars)") },
+                                isError = passwordError != null,
+                                supportingText = passwordError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = "Password", tint = GreenPrimary) },
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            // Confirm Password
+                            OutlinedTextField(
+                                value = confirmPassword,
+                                onValueChange = { confirmPassword = it; confirmPasswordError = null },
+                                label = { Text("Confirm Password") },
+                                isError = confirmPasswordError != null,
+                                supportingText = confirmPasswordError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = "Confirm", tint = GreenPrimary) },
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // 2. Farm Information Section
+                            Text(
+                                text = "2. Farm Information",
+                                style = Typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = GreenPrimary
+                            )
+
+                            OutlinedTextField(
+                                value = farmName,
+                                onValueChange = { farmName = it; farmNameError = null },
+                                label = { Text("Farm Name") },
+                                isError = farmNameError != null,
+                                supportingText = farmNameError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Home, contentDescription = "Farm Name", tint = GreenPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = farmLocation,
+                                onValueChange = { farmLocation = it; farmLocationError = null },
+                                label = { Text("Farm Location") },
+                                isError = farmLocationError != null,
+                                supportingText = farmLocationError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Place, contentDescription = "Location", tint = GreenPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = totalSheds,
+                                onValueChange = { totalSheds = it; totalShedsError = null },
+                                label = { Text("Total Sheds / Barns") },
+                                isError = totalShedsError != null,
+                                supportingText = totalShedsError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Apps, contentDescription = "Sheds", tint = GreenPrimary) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = floorSpace,
+                                onValueChange = { floorSpace = it; floorSpaceError = null },
+                                label = { Text("Floor Space (Sq. Ft.)") },
+                                isError = floorSpaceError != null,
+                                supportingText = floorSpaceError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Crop, contentDescription = "Floor Space", tint = GreenPrimary) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            // Veterinarians Registration Form
+
+                            // 1. Account Details Section
+                            Text(
+                                text = "1. Account Information",
+                                style = Typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = GreenPrimary
+                            )
+
+                            OutlinedTextField(
+                                value = email,
+                                onValueChange = { email = it; emailError = null },
+                                label = { Text("Email Address") },
+                                isError = emailError != null,
+                                supportingText = emailError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Email, contentDescription = "Email", tint = GreenPrimary) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = password,
+                                onValueChange = { password = it; passwordError = null },
+                                label = { Text("Password (min 6 chars)") },
+                                isError = passwordError != null,
+                                supportingText = passwordError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = "Password", tint = GreenPrimary) },
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = confirmPassword,
+                                onValueChange = { confirmPassword = it; confirmPasswordError = null },
+                                label = { Text("Confirm Password") },
+                                isError = confirmPasswordError != null,
+                                supportingText = confirmPasswordError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = "Confirm", tint = GreenPrimary) },
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // 2. Personal Information Section
+                            Text(
+                                text = "2. Personal Information",
+                                style = Typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = GreenPrimary
+                            )
+
+                            OutlinedTextField(
+                                value = name,
+                                onValueChange = { name = it; nameError = null },
+                                label = { Text("Full Name") },
+                                isError = nameError != null,
+                                supportingText = nameError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Person, contentDescription = "Name", tint = GreenPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = phone,
+                                onValueChange = { phone = it; phoneError = null },
+                                label = { Text("Phone Number") },
+                                isError = phoneError != null,
+                                supportingText = phoneError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Phone, contentDescription = "Phone", tint = GreenPrimary) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = location,
+                                onValueChange = { location = it; locationError = null },
+                                label = { Text("Location / City") },
+                                isError = locationError != null,
+                                supportingText = locationError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Place, contentDescription = "Location", tint = GreenPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = photoUrl,
+                                onValueChange = { photoUrl = it },
+                                label = { Text("Profile Photo URL (Optional)") },
+                                leadingIcon = { Icon(Icons.Default.Face, contentDescription = "Profile Photo", tint = GreenPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // 3. Professional Information Section
+                            Text(
+                                text = "3. Professional Information",
+                                style = Typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = GreenPrimary
+                            )
+
+                            OutlinedTextField(
+                                value = specialty,
+                                onValueChange = { specialty = it; specialtyError = null },
+                                label = { Text("Specialty") },
+                                isError = specialtyError != null,
+                                supportingText = specialtyError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Work, contentDescription = "Specialty", tint = GreenPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = qualification,
+                                onValueChange = { qualification = it; qualificationError = null },
+                                label = { Text("Qualification") },
+                                isError = qualificationError != null,
+                                supportingText = qualificationError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.School, contentDescription = "Qualification", tint = GreenPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = licenseNumber,
+                                onValueChange = { licenseNumber = it; licenseError = null },
+                                label = { Text("Veterinary License Number") },
+                                isError = licenseError != null,
+                                supportingText = licenseError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Info, contentDescription = "License Number", tint = GreenPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = experience,
+                                onValueChange = { experience = it; experienceError = null },
+                                label = { Text("Years of Experience") },
+                                isError = experienceError != null,
+                                supportingText = experienceError?.let { { Text(it) } },
+                                leadingIcon = { Icon(Icons.Default.Star, contentDescription = "Experience", tint = GreenPrimary) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
-
-                        // Password
-                        OutlinedTextField(
-                            value = password,
-                            onValueChange = { password = it },
-                            label = { Text("Password (min 6 chars)") },
-                            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = "Password", tint = GreenPrimary) },
-                            visualTransformation = PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = GreenPrimary,
-                                focusedLabelColor = GreenPrimary
-                            )
-                        )
-
-                        // Confirm Password
-                        OutlinedTextField(
-                            value = confirmPassword,
-                            onValueChange = { confirmPassword = it },
-                            label = { Text("Confirm Password") },
-                            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = "Confirm", tint = GreenPrimary) },
-                            visualTransformation = PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = GreenPrimary,
-                                focusedLabelColor = GreenPrimary
-                            )
-                        )
 
                         // Validation or API Error Messaging
                         val currentError = validationError ?: (uiState as? AuthUiState.Error)?.message
@@ -303,40 +620,32 @@ fun RegisterScreen(
                         // Submit Button
                         Button(
                             onClick = {
-                                validationError = null
-                                when {
-                                    name.isBlank() || email.isBlank() || password.isBlank() || confirmPassword.isBlank() -> {
-                                        validationError = "Please fill in all requested fields."
-                                    }
-                                    selectedRole == UserRole.FARMER && (farmName.isBlank() || farmLocation.isBlank()) -> {
-                                        validationError = "Please fill in all Farm details."
-                                    }
-                                    password.length < 6 -> {
-                                        validationError = "Password must be at least 6 characters."
-                                    }
-                                    password != confirmPassword -> {
-                                        validationError = "Passwords do not match."
-                                    }
-                                    else -> {
-                                        if (selectedRole == UserRole.FARMER) {
-                                            viewModel.register(
-                                                name = name,
-                                                email = email,
-                                                password = password,
-                                                role = selectedRole,
-                                                farmName = farmName,
-                                                farmLocation = farmLocation,
-                                                totalSheds = totalSheds.toIntOrNull() ?: 0,
-                                                floorSpaceSqFt = floorSpace.toIntOrNull() ?: 0
-                                            )
-                                        } else {
-                                            viewModel.register(
-                                                name = name,
-                                                email = email,
-                                                password = password,
-                                                role = selectedRole
-                                            )
-                                        }
+                                if (validateInputs()) {
+                                    if (selectedRole == UserRole.FARMER) {
+                                        viewModel.register(
+                                            name = name,
+                                            email = email,
+                                            password = password,
+                                            role = selectedRole,
+                                            farmName = farmName,
+                                            farmLocation = farmLocation,
+                                            totalSheds = totalSheds.toIntOrNull() ?: 0,
+                                            floorSpaceSqFt = floorSpace.toIntOrNull() ?: 0
+                                        )
+                                    } else {
+                                        viewModel.register(
+                                            name = name,
+                                            email = email,
+                                            password = password,
+                                            role = selectedRole,
+                                            phone = phone,
+                                            location = location,
+                                            photoUrl = photoUrl,
+                                            specialty = specialty,
+                                            qualification = qualification,
+                                            licenseNumber = licenseNumber,
+                                            experience = experience.toIntOrNull() ?: 0
+                                        )
                                     }
                                 }
                             },

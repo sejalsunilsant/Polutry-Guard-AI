@@ -2,8 +2,11 @@ package com.poultryguard.ai.data.api
 
 import android.content.Context
 import com.poultryguard.ai.data.cache.LocalCacheManager
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -36,6 +39,18 @@ data class SoundPredictionResponse(
     val message: String? = null
 )
 
+// Response layout returned by Multi-modal Guardian Prediction engine
+data class GuardianPredictionResponse(
+    val status: String,
+    val condition: String,
+    val riskLevel: DiseaseRiskLevel,
+    val confidence: Float,
+    val recommendation: String,
+    val imageUrl: String?,
+    val soundUrl: String?,
+    val timestamp: String
+)
+
 enum class DiseaseRiskLevel {
     LOW,
     MEDIUM,
@@ -52,6 +67,15 @@ interface DiseasePredictionApi {
     @Multipart
     @POST("api/v1/predict-sound")
     suspend fun predictSound(@Part file: MultipartBody.Part): SoundPredictionResponse
+
+    @Multipart
+    @POST("api/v1/guardian/predict")
+    suspend fun predictGuardian(
+        @Part("deviceId") deviceId: RequestBody,
+        @Part("farmId") farmId: RequestBody,
+        @Part image: MultipartBody.Part?,
+        @Part sound: MultipartBody.Part?
+    ): GuardianPredictionResponse
 }
 
 class DiseasePredictionRepository(private val context: Context) {
@@ -95,7 +119,6 @@ class DiseasePredictionRepository(private val context: Context) {
         }
     }
 
-
     suspend fun getLatestPrediction(deviceId: String): Result<DiseasePredictionResponse> {
         return try {
             val api = getApi() ?: throw Exception("Retrofit API not initialized.")
@@ -125,4 +148,27 @@ class DiseasePredictionRepository(private val context: Context) {
         }
     }
 
+    suspend fun predictGuardian(
+        deviceId: String,
+        farmId: String,
+        imagePart: MultipartBody.Part?,
+        soundPart: MultipartBody.Part?
+    ): Result<GuardianPredictionResponse> {
+        return try {
+            val api = getApi() ?: throw Exception("Retrofit API not initialized.")
+            val deviceIdBody = deviceId.toRequestBody("text/plain".toMediaTypeOrNull())
+            val farmIdBody = farmId.toRequestBody("text/plain".toMediaTypeOrNull())
+            
+            val response = api.predictGuardian(
+                deviceId = deviceIdBody,
+                farmId = farmIdBody,
+                image = imagePart,
+                sound = soundPart
+            )
+            Result.success(response)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
+

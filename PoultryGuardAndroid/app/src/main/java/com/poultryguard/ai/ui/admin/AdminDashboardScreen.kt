@@ -242,6 +242,12 @@ fun AdminDashboardScreen(
                     icon = { Icon(Icons.Default.Feedback, contentDescription = "Support") },
                     label = { Text("Support") }
                 )
+                NavigationBarItem(
+                    selected = selectedTab == 5,
+                    onClick = { selectedTab = 5 },
+                    icon = { Icon(Icons.Default.Map, contentDescription = "Map") },
+                    label = { Text("Map") }
+                )
             }
         }
     ) { innerPadding ->
@@ -1461,9 +1467,12 @@ fun AdminDashboardScreen(
                             }
                         }
                     }
+                }
+                5 -> {
+                    AdminMapView(farmers = farmersListState)
+                }
             }
         }
-    }
 
         if (showAddKitDialog) {
             AddKitDialog(
@@ -2923,7 +2932,7 @@ fun AddVetDialog(
                         consultationHistory = "No consultation history recorded yet.",
                         licenseNumber = licenseNumber,
                         qualification = qualification,
-                        experience = experience
+                        experience = experience.toIntOrNull() ?: 0
                     )
                     onAddVet(vet, password)
                 }
@@ -3003,7 +3012,7 @@ fun VetDetailDialog(
                     Text("4. Verified Credentials & Experience", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
                     DetailRow("License Number", vet.licenseNumber.ifBlank { "Unspecified" })
                     DetailRow("Qualification", vet.qualification.ifBlank { "Unspecified" })
-                    DetailRow("Experience", vet.experience.ifBlank { "Unspecified" })
+                    DetailRow("Experience", if (vet.experience > 0) "${vet.experience} years" else "Unspecified")
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(vet.credentialsDetails, style = Typography.bodyMedium, color = TextDark)
                 }

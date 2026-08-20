@@ -54,6 +54,10 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -834,6 +838,25 @@ fun AlertsScreen(
                     }
                 }
             }
+
+            // AI Health Guardian (ML Diagnostics) Card
+            item {
+                val cachedUser = remember { cacheManager.getCachedUserProfile() }
+                val farmId = cachedUser?.farmId ?: (uiState as? DashboardUiState.Success)?.activeBatch?.farmId ?: "farm_default"
+                val hardwareKits = remember { cacheManager.getHardwareKits() }
+                val activeKit = hardwareKits.find { it.isActive }
+                val deviceId = activeKit?.gatewayId ?: "ESP32-GATEWAY-DEFAULT"
+                val coroutineScope = rememberCoroutineScope()
+                val repo = remember { com.poultryguard.ai.data.api.DiseasePredictionRepository(context.applicationContext) }
+
+                GuardianMlDiagnosticsCard(
+                    context = context,
+                    deviceId = deviceId,
+                    farmId = farmId,
+                    coroutineScope = coroutineScope,
+                    repo = repo
+                )
+            }
         }
     }
 
@@ -1134,5 +1157,390 @@ private fun isSameDayOfMonth(startStr: String, targetStr: String): Boolean {
     } catch (e: Exception) {
         false
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GuardianMlDiagnosticsCard(
+    context: android.content.Context,
+    deviceId: String,
+    farmId: String,
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    repo: com.poultryguard.ai.data.api.DiseasePredictionRepository
+) {
+    var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var selectedSoundUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var isDiagnosing by remember { mutableStateOf(false) }
+    var diagnosisResult by remember { mutableStateOf<com.poultryguard.ai.data.api.GuardianPredictionResponse?>(null) }
+    var diagnosisError by remember { mutableStateOf<String?>(null) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        selectedImageUri = uri
+        diagnosisResult = null
+        diagnosisError = null
+    }
+
+    val soundPickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        selectedSoundUri = uri
+        diagnosisResult = null
+        diagnosisError = null
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = CardSurface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.SupportAgent,
+                    contentDescription = "AI Health Guardian",
+                    tint = GreenPrimary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "AI Health Guardian",
+                        style = Typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextDark
+                    )
+                    Text(
+                        text = "Multi-modal disease diagnosis using vision & sound ML models.",
+                        style = Typography.labelMedium,
+                        color = TextMedium
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // File selection row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Image Input Box
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AppBackground)
+                            .border(androidx.compose.foundation.BorderStroke(1.dp, DividerColor))
+                            .clickable { imagePickerLauncher.launch("image/*") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (selectedImageUri != null) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Image Selected",
+                                    tint = GreenPrimary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Image Selected",
+                                    fontSize = 11.sp,
+                                    color = TextDark,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.Visibility,
+                                    contentDescription = "Pick Image",
+                                    tint = TextMedium,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Upload Image",
+                                    fontSize = 11.sp,
+                                    color = TextMedium
+                                )
+                            }
+                        }
+                    }
+                    if (selectedImageUri != null) {
+                        Text(
+                            text = "Change",
+                            fontSize = 11.sp,
+                            color = GreenPrimary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { imagePickerLauncher.launch("image/*") }
+                                .padding(top = 4.dp)
+                        )
+                    }
+                }
+
+                // Sound Input Box
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(AppBackground)
+                            .border(androidx.compose.foundation.BorderStroke(1.dp, DividerColor))
+                            .clickable { soundPickerLauncher.launch("audio/*") },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (selectedSoundUri != null) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Sound Selected",
+                                    tint = GreenPrimary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Sound Selected",
+                                    fontSize = 11.sp,
+                                    color = TextDark,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Default.Assignment,
+                                    contentDescription = "Pick Sound",
+                                    tint = TextMedium,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Upload Sound",
+                                    fontSize = 11.sp,
+                                    color = TextMedium
+                                )
+                            }
+                        }
+                    }
+                    if (selectedSoundUri != null) {
+                        Text(
+                            text = "Change",
+                            fontSize = 11.sp,
+                            color = GreenPrimary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clickable { soundPickerLauncher.launch("audio/*") }
+                                .padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Action Button
+            if (isDiagnosing) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = GreenPrimary)
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (selectedImageUri == null && selectedSoundUri == null) {
+                            Toast.makeText(context, "Please select at least an image or a sound file.", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        
+                        isDiagnosing = true
+                        coroutineScope.launch {
+                            val imagePart = selectedImageUri?.let { uriToMultipartBodyPart(context, it, "image") }
+                            val soundPart = selectedSoundUri?.let { uriToMultipartBodyPart(context, it, "sound") }
+                            
+                            val result = repo.predictGuardian(
+                                deviceId = deviceId,
+                                farmId = farmId,
+                                imagePart = imagePart,
+                                soundPart = soundPart
+                            )
+                            
+                            result.onSuccess { res ->
+                                diagnosisResult = res
+                                diagnosisError = null
+                                isDiagnosing = false
+                            }.onFailure { err ->
+                                diagnosisError = err.message ?: "An unknown diagnostic error occurred"
+                                diagnosisResult = null
+                                isDiagnosing = false
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = GreenPrimary,
+                        disabledContainerColor = GreenPrimary.copy(alpha = 0.5f)
+                    ),
+                    enabled = selectedImageUri != null || selectedSoundUri != null
+                ) {
+                    Text(
+                        text = "Analyze Flock Health",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+
+            // Diagnostic results display
+            if (diagnosisResult != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = DividerColor, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                val result = diagnosisResult!!
+                val badgeColor = when (result.riskLevel) {
+                    com.poultryguard.ai.data.api.DiseaseRiskLevel.HIGH -> AlertRed
+                    com.poultryguard.ai.data.api.DiseaseRiskLevel.MEDIUM -> AlertOrange
+                    else -> GreenPrimary
+                }
+                val badgeBg = badgeColor.copy(alpha = 0.1f)
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(badgeBg, shape = RoundedCornerShape(12.dp))
+                        .border(androidx.compose.foundation.BorderStroke(1.dp, badgeColor.copy(alpha = 0.2f)), RoundedCornerShape(12.dp))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "DIAGNOSTIC OUTCOME",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = badgeColor,
+                            letterSpacing = 1.sp
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(badgeColor)
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Risk: ${result.riskLevel.name}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Condition: ${result.condition} (${(result.confidence * 100).toInt()}% confidence)",
+                        style = Typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextDark
+                    )
+
+                    Text(
+                        text = result.recommendation,
+                        style = Typography.bodyMedium,
+                        color = TextDark.copy(alpha = 0.9f)
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Analyzed on: ${result.timestamp}",
+                        fontSize = 10.sp,
+                        color = TextMedium
+                    )
+                }
+            }
+
+            if (diagnosisError != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Diagnosis Error: ${diagnosisError!!}",
+                    color = AlertRed,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+fun uriToMultipartBodyPart(
+    context: android.content.Context,
+    uri: android.net.Uri,
+    partName: String
+): okhttp3.MultipartBody.Part? {
+    try {
+        val contentResolver = context.contentResolver
+        val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+        val fileName = getFileName(context, uri) ?: "temp_file"
+        
+        val inputStream = contentResolver.openInputStream(uri) ?: return null
+        val bytes = inputStream.readBytes()
+        inputStream.close()
+        
+        val requestFile = bytes.toRequestBody(mimeType.toMediaTypeOrNull())
+        return okhttp3.MultipartBody.Part.createFormData(partName, fileName, requestFile)
+    } catch (e: Exception) {
+        e.printStackTrace()
+        return null
+    }
+}
+
+fun getFileName(context: android.content.Context, uri: android.net.Uri): String? {
+    var result: String? = null
+    if (uri.scheme == "content") {
+        val cursor = context.contentResolver.query(uri, null, null, null, null)
+        try {
+            if (cursor != null && cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (index != -1) {
+                    result = cursor.getString(index)
+                }
+            }
+        } finally {
+            cursor?.close()
+        }
+    }
+    if (result == null) {
+        result = uri.path
+        val cut = result?.lastIndexOf('/') ?: -1
+        if (cut != -1) {
+            result = result?.substring(cut + 1)
+        }
+    }
+    return result
 }
 

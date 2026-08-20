@@ -365,7 +365,11 @@ CREATE TABLE IF NOT EXISTS veterinarians (
     email VARCHAR(100) UNIQUE NOT NULL,
     location VARCHAR(100),
     verification_status VARCHAR(20) DEFAULT 'PENDING' CHECK (verification_status IN ('PENDING', 'VERIFIED', 'REJECTED', 'SUSPENDED')),
-    availability VARCHAR(20) DEFAULT 'Available' NOT NULL
+    availability VARCHAR(20) DEFAULT 'Available' NOT NULL,
+    photo_url TEXT,
+    license_number VARCHAR(100),
+    qualification VARCHAR(100),
+    experience INTEGER
 );
 
 -- 15. Device Kits Table
@@ -576,4 +580,24 @@ CREATE POLICY "Allow public update on farm_settings" ON public.farm_settings FOR
 CREATE POLICY "Allow public insert on batches" ON public.batches FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public select on batches" ON public.batches FOR SELECT USING (true);
 CREATE POLICY "Allow public update on batches" ON public.batches FOR UPDATE USING (true) WITH CHECK (true);
+
+-- 25. Device Wi-Fi Configurations Table
+CREATE TABLE IF NOT EXISTS public.device_wifi_configs (
+    device_id VARCHAR(50) PRIMARY KEY REFERENCES public.devices(id) ON DELETE CASCADE,
+    wifi_ssid VARCHAR(100) NOT NULL,
+    encrypted_wifi_password TEXT NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+
+GRANT ALL PRIVILEGES ON TABLE public.device_wifi_configs TO anon, authenticated;
+ALTER TABLE public.device_wifi_configs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public insert on device_wifi_configs" ON public.device_wifi_configs;
+DROP POLICY IF EXISTS "Allow public select on device_wifi_configs" ON public.device_wifi_configs;
+DROP POLICY IF EXISTS "Allow public update on device_wifi_configs" ON public.device_wifi_configs;
+
+CREATE POLICY "Allow public insert on device_wifi_configs" ON public.device_wifi_configs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public select on device_wifi_configs" ON public.device_wifi_configs FOR SELECT USING (true);
+CREATE POLICY "Allow public update on device_wifi_configs" ON public.device_wifi_configs FOR UPDATE USING (true) WITH CHECK (true);
+
 

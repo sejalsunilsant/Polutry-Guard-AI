@@ -30,6 +30,18 @@ class VetRepository(private val context: Context) {
         vetDao.updateAvailability(id, status)
     }
 
+    suspend fun updateProfile(
+        id: String,
+        phone: String,
+        specialty: String,
+        location: String,
+        qualification: String,
+        licenseNumber: String,
+        experience: Int
+    ) {
+        vetDao.updateProfile(id, phone, specialty, location, qualification, licenseNumber, experience)
+    }
+
     private val cacheManager = com.poultryguard.ai.data.cache.LocalCacheManager(context)
     private var currentUrl: String = ""
     private var cachedApi: com.poultryguard.ai.data.api.AuthApi? = null
@@ -70,9 +82,12 @@ class VetRepository(private val context: Context) {
                         phone = dto.phone ?: "",
                         email = dto.email,
                         location = dto.location ?: "",
-                        photoUrl = "",
+                        photoUrl = dto.photoUrl ?: "",
                         availability = dto.availability,
-                        verificationStatus = dto.verificationStatus
+                        verificationStatus = dto.verificationStatus,
+                        licenseNumber = dto.licenseNumber ?: "",
+                        qualification = dto.qualification ?: "",
+                        experience = dto.experience ?: 0
                     )
                 }
                 vetDao.deleteAll()

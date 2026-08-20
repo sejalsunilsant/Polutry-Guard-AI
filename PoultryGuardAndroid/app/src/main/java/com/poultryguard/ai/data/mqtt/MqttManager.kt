@@ -11,7 +11,8 @@ class MqttManager(
     private val context: Context,
     private val brokerUrl: String = "tcp://broker.hivemq.com:1883", // Public sandbox broker for ESP32/Raspberry Pi
     private val onReadingReceived: (topic: String, value: Float) -> Unit,
-    private val onConnectionStateChanged: (connected: Boolean) -> Unit
+    private val onConnectionStateChanged: (connected: Boolean) -> Unit,
+    private val onStringMessageReceived: ((topic: String, payload: String) -> Unit)? = null
 ) {
     private var mqttClient: MqttAsyncClient? = null
     private var isConnected = false
@@ -77,6 +78,10 @@ class MqttManager(
                     if (topic != null && message != null) {
                         try {
                             val payload = String(message.payload)
+                            
+                            // Forward all string payloads to the optional callback
+                            onStringMessageReceived?.invoke(topic, payload)
+                            
                             val floatVal = payload.toFloatOrNull()
                             if (floatVal != null) {
                                 // Stop simulator feed if running, since real telemetry has arrived
@@ -102,7 +107,7 @@ class MqttManager(
         }
     }
 
-    private fun subscribeToTopic(topic: String) {
+    fun subscribeToTopic(topic: String) {
         try {
             mqttClient?.subscribe(topic, 1, null, object : IMqttActionListener {
                 override fun onSuccess(asyncActionToken: IMqttToken?) {

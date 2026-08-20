@@ -13,7 +13,14 @@ data class RegisterRequest(
     @SerializedName("farmName") val farmName: String,
     @SerializedName("farmLocation") val farmLocation: String,
     @SerializedName("totalSheds") val totalSheds: Int,
-    @SerializedName("floorSpaceSqFt") val floorSpaceSqFt: Int
+    @SerializedName("floorSpaceSqFt") val floorSpaceSqFt: Int,
+    @SerializedName("phone") val phone: String? = null,
+    @SerializedName("specialty") val specialty: String? = null,
+    @SerializedName("location") val location: String? = null,
+    @SerializedName("photoUrl") val photoUrl: String? = null,
+    @SerializedName("licenseNumber") val licenseNumber: String? = null,
+    @SerializedName("qualification") val qualification: String? = null,
+    @SerializedName("experience") val experience: Int? = null
 )
 
 data class LoginRequest(
@@ -86,7 +93,11 @@ data class VeterinarianDto(
     @SerializedName("email") val email: String,
     @SerializedName("location") val location: String?,
     @SerializedName("verification_status") val verificationStatus: String,
-    @SerializedName("availability") val availability: String
+    @SerializedName("availability") val availability: String,
+    @SerializedName("photo_url") val photoUrl: String? = null,
+    @SerializedName("license_number") val licenseNumber: String? = null,
+    @SerializedName("qualification") val qualification: String? = null,
+    @SerializedName("experience") val experience: Int? = null
 )
 
 data class UserContextResponse(
@@ -104,7 +115,15 @@ data class UserContextDto(
     @SerializedName("deviceId") val deviceId: String?,
     @SerializedName("deviceName") val deviceName: String?,
     @SerializedName("thingspeakChannelId") val thingspeakChannelId: String?,
-    @SerializedName("thingspeakReadApiKey") val thingspeakReadApiKey: String?
+    @SerializedName("thingspeakReadApiKey") val thingspeakReadApiKey: String?,
+    @SerializedName("wifiSsid") val wifiSsid: String?,
+    @SerializedName("phone") val phone: String? = null,
+    @SerializedName("location") val location: String? = null,
+    @SerializedName("specialty") val specialty: String? = null,
+    @SerializedName("photoUrl") val photoUrl: String? = null,
+    @SerializedName("licenseNumber") val licenseNumber: String? = null,
+    @SerializedName("qualification") val qualification: String? = null,
+    @SerializedName("experience") val experience: Int? = null
 )
 
 // ── Kit Management DTOs ─────────────────────────────────────────────────────
@@ -211,5 +230,24 @@ interface AuthApi {
     /** Fetch all registered device kits (excludes write API key). */
     @retrofit2.http.GET("api/v1/admin/kits")
     suspend fun listKits(): KitListApiResponse
+
+    /** Configure Wi-Fi credentials for a device kit. */
+    @POST("api/v1/device/configure-wifi")
+    suspend fun configureWifi(
+        @retrofit2.http.Header("Authorization") token: String,
+        @Body body: ConfigureWifiRequest
+    ): ConfigureWifiResponse
 }
+
+data class ConfigureWifiRequest(
+    @SerializedName("deviceId") val deviceId: String,
+    @SerializedName("ssid") val ssid: String,
+    @SerializedName("password") val password: String
+)
+
+data class ConfigureWifiResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("message") val message: String
+)
+
 

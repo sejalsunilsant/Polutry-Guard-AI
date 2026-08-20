@@ -9,7 +9,8 @@ data class UserProfile(
     val joinDate: String = "",
     val approvalStatus: String = "APPROVED",
     val rejectionReason: String? = null,
-    val farmId: String? = null
+    val farmId: String? = null,
+    val token: String? = null
 )
 
 enum class UserRole {
