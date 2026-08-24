@@ -15,7 +15,6 @@ android {
         properties.load(propertiesFile.inputStream())
     }
     val groqApiKey = properties.getProperty("groq.api.key") ?: "\"\""
-    val googleMapsKey = properties.getProperty("google.maps.key") ?: "\"\""
     defaultConfig {
         applicationId = "com.poultryguard.ai"
         minSdk = 26
@@ -28,7 +27,6 @@ android {
             useSupportLibrary = true
         }
         buildConfigField("String", "GROQ_API_KEY", groqApiKey)
-        buildConfigField("String", "GOOGLE_MAPS_KEY", googleMapsKey)
     }
 
     buildTypes {
@@ -81,6 +79,9 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+
+    // MapLibre Native Android SDK for map rendering with OSM tiles
+    implementation("org.maplibre.gl:android-sdk:11.5.2")
 
 
 

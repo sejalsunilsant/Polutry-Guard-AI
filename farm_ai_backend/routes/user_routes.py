@@ -3,7 +3,8 @@ from data.supabase_client import (
     sync_user_profile,
     supabase_register_user,
     supabase_login_user,
-    supabase_forgot_password
+    supabase_forgot_password,
+    get_coordinates_for_location
 )
 
 user_bp = Blueprint("user_bp", __name__)
@@ -28,6 +29,10 @@ def sync_user():
         qualification = data.get('qualification')
         experience = data.get('experience')
         
+        # Coordinates
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        
         if not uid or not name or not email or not role:
             return jsonify({'error': 'uid, name, email, and role are required parameters'}), 400
             
@@ -44,7 +49,9 @@ def sync_user():
             photo_url=photo_url,
             license_number=license_number,
             qualification=qualification,
-            experience=experience
+            experience=experience,
+            latitude=latitude,
+            longitude=longitude
         )
         
         if res.get('status') == 'error':
@@ -83,6 +90,10 @@ def auth_register():
         qualification = data.get('qualification')
         experience = data.get('experience')
         
+        # Coordinates
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        
         if not name or not email or not password or not role:
             return jsonify({'error': 'name, email, password, and role are required fields'}), 400
             
@@ -101,7 +112,9 @@ def auth_register():
             photo_url=photo_url,
             license_number=license_number,
             qualification=qualification,
-            experience=experience
+            experience=experience,
+            latitude=latitude,
+            longitude=longitude
         )
         
         if res.get('status') == 'error':
@@ -288,7 +301,9 @@ def get_user_context(profile_id):
             "deviceId": None,
             "deviceName": None,
             "thingspeakChannelId": None,
-            "thingspeakReadApiKey": None
+            "thingspeakReadApiKey": None,
+            "latitude": None,
+            "longitude": None
         }
 
         if role == "FARMER":
@@ -297,9 +312,24 @@ def get_user_context(profile_id):
                 farm_id = member_res.data[0].get("farm_id")
                 context_data["farmId"] = farm_id
 
-                farm_res = supabase.table("farms").select("name").eq("id", farm_id).execute()
+                farm_res = supabase.table("farms").select("*").eq("id", farm_id).execute()
                 if farm_res.data:
-                    context_data["farmName"] = farm_res.data[0].get("name")
+                    farm = farm_res.data[0]
+                    lat = farm.get("latitude")
+                    lng = farm.get("longitude")
+                    if lat is None or lng is None:
+                        loc_str = farm.get("location") or farm.get("name") or profile.get("name")
+                        lat, lng = get_coordinates_for_location(loc_str, profile_id)
+                        try:
+                            supabase.table("farms").update({
+                                "latitude": lat,
+                                "longitude": lng
+                            }).eq("id", farm_id).execute()
+                        except Exception:
+                            pass
+                    context_data["farmName"] = farm.get("name")
+                    context_data["latitude"] = lat
+                    context_data["longitude"] = lng
 
                 device_res = supabase.table("devices").select("*").eq("farm_id", farm_id).execute()
                 if device_res.data:
@@ -322,8 +352,22 @@ def get_user_context(profile_id):
             vet_res = supabase.table("veterinarians").select("*").eq("id", profile_id).execute()
             if vet_res.data:
                 vet = vet_res.data[0]
+                lat = vet.get("latitude")
+                lng = vet.get("longitude")
+                if lat is None or lng is None:
+                    loc_str = vet.get("location") or vet.get("name")
+                    lat, lng = get_coordinates_for_location(loc_str, profile_id)
+                    try:
+                        supabase.table("veterinarians").update({
+                            "latitude": lat,
+                            "longitude": lng
+                        }).eq("id", profile_id).execute()
+                    except Exception:
+                        pass
                 context_data["phone"] = vet.get("phone")
                 context_data["location"] = vet.get("location")
+                context_data["latitude"] = lat
+                context_data["longitude"] = lng
                 context_data["specialty"] = vet.get("specialty")
                 context_data["photoUrl"] = vet.get("photo_url")
                 context_data["licenseNumber"] = vet.get("license_number")

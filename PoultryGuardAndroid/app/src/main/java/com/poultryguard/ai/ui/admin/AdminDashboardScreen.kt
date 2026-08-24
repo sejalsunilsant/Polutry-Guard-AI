@@ -161,6 +161,12 @@ fun AdminDashboardScreen(
 
     var selectedTab by remember { mutableStateOf(0) }
 
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 5) {
+            authRepository.syncAllFarmers()
+        }
+    }
+
     // Dialog state variables
     var showAddFarmerDialog by remember { mutableStateOf(false) }
     var showAddKitDialog by remember { mutableStateOf(false) }
@@ -1674,6 +1680,7 @@ fun AdminDashboardScreen(
                 }
             )
         }
+
 
         // Farmer Details Dialog Layout
         selectedFarmer?.let { farmer ->

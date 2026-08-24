@@ -5,6 +5,8 @@
 CREATE TABLE IF NOT EXISTS farms (
     id VARCHAR(50) PRIMARY KEY, -- e.g. 'farm_a'
     name VARCHAR(100) NOT NULL,
+    latitude NUMERIC(9, 6),
+    longitude NUMERIC(9, 6),
     created_at TIMESTAMPTZ DEFAULT now() NOT NULL
 );
 
@@ -79,6 +81,10 @@ ALTER TABLE devices ADD COLUMN IF NOT EXISTS thingspeak_channel_id VARCHAR(50);
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS thingspeak_read_api_key VARCHAR(50);
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS kit_id VARCHAR(50);
 ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+
+-- Farm location coordinate migrations
+ALTER TABLE farms ADD COLUMN IF NOT EXISTS latitude NUMERIC(9, 6);
+ALTER TABLE farms ADD COLUMN IF NOT EXISTS longitude NUMERIC(9, 6);
 
 -- Kit pre-registration extended columns (device_kits table)
 ALTER TABLE device_kits ADD COLUMN IF NOT EXISTS name VARCHAR(100);
@@ -364,6 +370,8 @@ CREATE TABLE IF NOT EXISTS veterinarians (
     phone VARCHAR(20),
     email VARCHAR(100) UNIQUE NOT NULL,
     location VARCHAR(100),
+    latitude NUMERIC(9, 6),
+    longitude NUMERIC(9, 6),
     verification_status VARCHAR(20) DEFAULT 'PENDING' CHECK (verification_status IN ('PENDING', 'VERIFIED', 'REJECTED', 'SUSPENDED')),
     availability VARCHAR(20) DEFAULT 'Available' NOT NULL,
     photo_url TEXT,
@@ -371,6 +379,10 @@ CREATE TABLE IF NOT EXISTS veterinarians (
     qualification VARCHAR(100),
     experience INTEGER
 );
+
+-- Veterinarian coordinates migrations
+ALTER TABLE public.veterinarians ADD COLUMN IF NOT EXISTS latitude NUMERIC(9, 6);
+ALTER TABLE public.veterinarians ADD COLUMN IF NOT EXISTS longitude NUMERIC(9, 6);
 
 -- 15. Device Kits Table
 CREATE TABLE IF NOT EXISTS device_kits (

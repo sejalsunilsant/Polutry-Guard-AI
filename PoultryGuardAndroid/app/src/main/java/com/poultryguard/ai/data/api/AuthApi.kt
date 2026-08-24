@@ -20,7 +20,9 @@ data class RegisterRequest(
     @SerializedName("photoUrl") val photoUrl: String? = null,
     @SerializedName("licenseNumber") val licenseNumber: String? = null,
     @SerializedName("qualification") val qualification: String? = null,
-    @SerializedName("experience") val experience: Int? = null
+    @SerializedName("experience") val experience: Int? = null,
+    @SerializedName("latitude") val latitude: Double? = null,
+    @SerializedName("longitude") val longitude: Double? = null
 )
 
 data class LoginRequest(
@@ -61,7 +63,9 @@ data class FarmMemberDto(
 )
 
 data class FarmDto(
-    @SerializedName("name") val name: String
+    @SerializedName("name") val name: String,
+    @SerializedName("latitude") val latitude: Double? = null,
+    @SerializedName("longitude") val longitude: Double? = null
 )
 
 data class ReviewFarmerRequest(
@@ -97,7 +101,9 @@ data class VeterinarianDto(
     @SerializedName("photo_url") val photoUrl: String? = null,
     @SerializedName("license_number") val licenseNumber: String? = null,
     @SerializedName("qualification") val qualification: String? = null,
-    @SerializedName("experience") val experience: Int? = null
+    @SerializedName("experience") val experience: Int? = null,
+    @SerializedName("latitude") val latitude: Double? = null,
+    @SerializedName("longitude") val longitude: Double? = null
 )
 
 data class UserContextResponse(
@@ -123,7 +129,9 @@ data class UserContextDto(
     @SerializedName("photoUrl") val photoUrl: String? = null,
     @SerializedName("licenseNumber") val licenseNumber: String? = null,
     @SerializedName("qualification") val qualification: String? = null,
-    @SerializedName("experience") val experience: Int? = null
+    @SerializedName("experience") val experience: Int? = null,
+    @SerializedName("latitude") val latitude: Double? = null,
+    @SerializedName("longitude") val longitude: Double? = null
 )
 
 // ── Kit Management DTOs ─────────────────────────────────────────────────────

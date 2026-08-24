@@ -23,6 +23,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.poultryguard.ai.R
 import com.poultryguard.ai.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -143,6 +146,17 @@ fun ForgotPasswordScreen(
                         }
                     }
                 } else {
+                    // Brand Header Logo
+                    Image(
+                        painter = painterResource(id = R.drawable.logo),
+                        contentDescription = "Poultry Guard Logo",
+                        modifier = Modifier
+                            .size(100.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
                     // Request Email View State
                     Text(
                         text = "Reset Password",

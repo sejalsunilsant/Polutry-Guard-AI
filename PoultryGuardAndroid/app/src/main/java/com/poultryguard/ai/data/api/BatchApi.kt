@@ -35,8 +35,18 @@ data class CloseBatchRequest(
 )
 
 data class RecordMortalityRequest(
+    @SerializedName("id")
+    val id: String,
     @SerializedName("death_count")
-    val deathCount: Int
+    val deathCount: Int,
+    @SerializedName("reason")
+    val reason: String,
+    @SerializedName("notes")
+    val notes: String?,
+    @SerializedName("recorded_at")
+    val recordedAt: Long,
+    @SerializedName("recorded_by")
+    val recordedBy: String
 )
 
 data class BatchApiResponse(
