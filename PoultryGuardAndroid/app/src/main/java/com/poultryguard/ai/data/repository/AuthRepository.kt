@@ -32,7 +32,9 @@ interface AuthRepository {
         photoUrl: String = "",
         licenseNumber: String = "",
         qualification: String = "",
-        experience: Int = 0
+        experience: Int = 0,
+        latitude: Double? = null,
+        longitude: Double? = null
     ): Result<UserProfile>
     suspend fun forgotPassword(email: String): Result<Unit>
     suspend fun logout(): Result<Unit>
@@ -129,7 +131,9 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
         photoUrl: String,
         licenseNumber: String,
         qualification: String,
-        experience: Int
+        experience: Int,
+        latitude: Double?,
+        longitude: Double?
     ): Result<UserProfile> = withContext(Dispatchers.IO) {
         try {
             val api = getApi()
@@ -149,7 +153,9 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                     photoUrl = photoUrl,
                     licenseNumber = licenseNumber,
                     qualification = qualification,
-                    experience = experience
+                    experience = experience,
+                    latitude = latitude,
+                    longitude = longitude
                 )
             )
             if (response.status == "success" && response.data != null) {
@@ -252,6 +258,7 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                 val db = com.poultryguard.ai.data.cache.AppDatabase.getDatabase(context)
                 val farmers = response.data.map { dto ->
                     val farmMember = dto.farmMembers?.firstOrNull()
+                    val farm = farmMember?.farms
                     com.poultryguard.ai.data.model.FarmerProfile(
                         id = dto.id,
                         name = dto.name,
@@ -260,8 +267,10 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                         accountStatus = if (dto.approvalStatus == "APPROVED") "Active" else "Pending",
                         lastActive = "Just now",
                         isOnline = false,
-                        farmName = farmMember?.farms?.name ?: "",
+                        farmName = farm?.name ?: "",
                         farmLocation = "",
+                        latitude = farm?.latitude,
+                        longitude = farm?.longitude,
                         totalSheds = 4,
                         floorSpaceSqFt = 24000,
                         deviceId = "",
@@ -305,6 +314,8 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                         isOnline = true,
                         farmName = dto.farmName ?: "",
                         farmLocation = existing?.farmLocation ?: "",
+                        latitude = dto.latitude ?: existing?.latitude,
+                        longitude = dto.longitude ?: existing?.longitude,
                         totalSheds = existing?.totalSheds ?: 4,
                         floorSpaceSqFt = existing?.floorSpaceSqFt ?: 24000,
                         deviceId = dto.deviceId ?: "",

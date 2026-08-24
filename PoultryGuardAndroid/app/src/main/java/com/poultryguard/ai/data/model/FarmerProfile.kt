@@ -16,6 +16,8 @@ data class FarmerProfile(
     // Farm Information
     val farmName: String,
     val farmLocation: String,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
     val totalSheds: Int,
     val floorSpaceSqFt: Int,
     

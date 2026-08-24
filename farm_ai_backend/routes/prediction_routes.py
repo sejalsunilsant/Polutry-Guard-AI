@@ -212,8 +212,16 @@ def predict_disease_endpoint():
         sensor_pred = ModelManager.predict_sensor([temp, humid, ammonia])
         
         # 7. Decision Fusion
+        from data.supabase_client import get_active_batch, get_mortality_records
+        active_batch = get_active_batch(farm_id)
+        batch_id = active_batch.get("id") if active_batch else None
+        recent_deaths = 0
+        if batch_id:
+            mort_records = get_mortality_records(batch_id)
+            recent_deaths = sum(int(r.get("death_count", 0) or r.get("deathCount", 0)) for r in mort_records)
+
         from ml.fusion.decision_engine import fuse_decisions
-        fused_disease, confidence, prob_map = fuse_decisions(temp, humid, ammonia, sensor_pred, sound_pred, image_pred)
+        fused_disease, confidence, prob_map = fuse_decisions(temp, humid, ammonia, sensor_pred, sound_pred, image_pred, recent_deaths=recent_deaths)
         
         if fused_disease == "Healthy":
             risk_level = "LOW"
@@ -501,6 +509,14 @@ def guardian_predict_endpoint():
         sensor_pred = ModelManager.predict_sensor([temp, humid, ammonia])
 
         # Fuse visual, acoustic, and environmental sensors
+        from data.supabase_client import get_active_batch, get_mortality_records
+        active_batch = get_active_batch(farm_id)
+        batch_id = active_batch.get("id") if active_batch else None
+        recent_deaths = 0
+        if batch_id:
+            mort_records = get_mortality_records(batch_id)
+            recent_deaths = sum(int(r.get("death_count", 0) or r.get("deathCount", 0)) for r in mort_records)
+
         from ml.fusion.decision_engine import fuse_decisions
         fused_disease, confidence, prob_map = fuse_decisions(
             temp=temp,
@@ -508,7 +524,8 @@ def guardian_predict_endpoint():
             ammonia=ammonia,
             sensor_pred=sensor_pred,
             sound_pred=sound_pred,
-            image_pred=image_pred
+            image_pred=image_pred,
+            recent_deaths=recent_deaths
         )
 
         # Map risk level

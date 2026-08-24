@@ -1,7 +1,7 @@
 import os
 from data.supabase_client import save_prediction
 
-def fuse_decisions(temp, hum, ammonia, sensor_pred, sound_pred, image_pred, egg_drop=False, feed_drop=False):
+def fuse_decisions(temp, hum, ammonia, sensor_pred, sound_pred, image_pred, egg_drop=False, feed_drop=False, recent_deaths=0):
     """
     Weighted decision fusion engine combining environmental sensors (XGBoost),
     audio monitoring (TFLite/ONNX), and image monitoring (Heuristics/ONNX).
@@ -140,6 +140,22 @@ def fuse_decisions(temp, hum, ammonia, sensor_pred, sound_pred, image_pred, egg_
         prob_map["Newcastle"] = max(prob_map["Newcastle"], 0.70)
         prob_map["Avian Influenza"] = max(prob_map["Avian Influenza"], 0.25)
 
+    # Apply Mortality adjustments
+    if recent_deaths > 0:
+        # Reduce Healthy probability as mortality is a counter-indicator
+        prob_map["Healthy"] = max(0.0, prob_map["Healthy"] - (0.2 * recent_deaths))
+        # Boost specific diseases depending on the intensity of deaths
+        if recent_deaths >= 10:
+            prob_map["Avian Influenza"] = max(prob_map["Avian Influenza"], 0.45)
+            prob_map["Newcastle"] = max(prob_map["Newcastle"], 0.35)
+        elif recent_deaths >= 5:
+            prob_map["Avian Influenza"] = max(prob_map["Avian Influenza"], 0.30)
+            prob_map["Newcastle"] = max(prob_map["Newcastle"], 0.25)
+            prob_map["Infectious Bronchitis"] = max(prob_map["Infectious Bronchitis"], 0.20)
+        else:
+            prob_map["Coccidiosis"] = max(prob_map["Coccidiosis"], 0.15)
+            prob_map["Infectious Bronchitis"] = max(prob_map["Infectious Bronchitis"], 0.15)
+
     # Normalize probabilities to sum to 1.0
     total_prob = sum(prob_map.values())
     if total_prob > 0.0:
@@ -159,8 +175,17 @@ def fuse_and_store(device_id, telemetry_id, temp, hum, ammonia, sound_level, sen
     Fuses predictions from all modalities, calculates risk levels,
     generates biosecurity recommendations, and stores the results to Supabase.
     """
+    from data.supabase_client import get_active_batch, get_mortality_records
+    active_batch = get_active_batch(farm_id)
+    batch_id = active_batch.get("id") if active_batch else None
+    
+    recent_deaths = 0
+    if batch_id:
+        mort_records = get_mortality_records(batch_id)
+        recent_deaths = sum(int(r.get("death_count", 0) or r.get("deathCount", 0)) for r in mort_records)
+
     # Run weighted fusion
-    fused_disease, confidence, prob_map = fuse_decisions(temp, hum, ammonia, sensor_pred, sound_pred, image_pred)
+    fused_disease, confidence, prob_map = fuse_decisions(temp, hum, ammonia, sensor_pred, sound_pred, image_pred, recent_deaths=recent_deaths)
     
     # 1. Determine risk level
     if fused_disease == "Healthy":

@@ -136,7 +136,21 @@ def record_batch_mortality(batch_id):
         except ValueError:
             return jsonify({'error': 'deathCount must be a valid integer'}), 400
             
-        res = record_mortality(batch_id, death_count)
+        record_id = data.get('id')
+        reason = data.get('reason') or data.get('suspected_cause') or data.get('suspectedCause') or "Unspecified"
+        notes = data.get('notes') or data.get('symptoms') or ""
+        recorded_at = data.get('recorded_at') or data.get('recordedAt') or data.get('timestamp')
+        recorded_by = data.get('recorded_by') or data.get('recordedBy') or "Farmer"
+            
+        res = record_mortality(
+            batch_id=batch_id,
+            death_count=death_count,
+            record_id=record_id,
+            reason=reason,
+            notes=notes,
+            recorded_at=recorded_at,
+            recorded_by=recorded_by
+        )
         
         if res.get('status') == 'error':
             return jsonify({'error': res.get('message')}), 400

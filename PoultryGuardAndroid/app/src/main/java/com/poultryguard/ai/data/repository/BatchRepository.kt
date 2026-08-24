@@ -204,7 +204,14 @@ class BatchRepository(private val context: Context) {
             if (api != null) {
                 val response = api.recordMortality(
                     batchId = batchId,
-                    body = RecordMortalityRequest(deathCount = deathCount)
+                    body = RecordMortalityRequest(
+                        id = record.id,
+                        deathCount = record.deathCount,
+                        reason = record.reason,
+                        notes = record.notes,
+                        recordedAt = record.timestamp,
+                        recordedBy = record.recordedBy
+                    )
                 )
                 if (response.status == "success" && response.data != null) {
                     val updatedBatch = response.data
@@ -243,7 +250,14 @@ class BatchRepository(private val context: Context) {
                     try {
                         val response = api.recordMortality(
                             batchId = bId,
-                            body = RecordMortalityRequest(deathCount = record.deathCount)
+                            body = RecordMortalityRequest(
+                                id = record.id,
+                                deathCount = record.deathCount,
+                                reason = record.reason,
+                                notes = record.notes,
+                                recordedAt = record.timestamp,
+                                recordedBy = record.recordedBy
+                            )
                         )
                         if (response.status == "success") {
                             mortalityDao.markAsSynced(record.id)

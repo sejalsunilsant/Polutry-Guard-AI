@@ -87,7 +87,9 @@ class VetRepository(private val context: Context) {
                         verificationStatus = dto.verificationStatus,
                         licenseNumber = dto.licenseNumber ?: "",
                         qualification = dto.qualification ?: "",
-                        experience = dto.experience ?: 0
+                        experience = dto.experience ?: 0,
+                        latitude = dto.latitude,
+                        longitude = dto.longitude
                     )
                 }
                 vetDao.deleteAll()

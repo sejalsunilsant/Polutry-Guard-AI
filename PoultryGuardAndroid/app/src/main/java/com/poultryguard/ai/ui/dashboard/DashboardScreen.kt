@@ -40,6 +40,9 @@ import com.poultryguard.ai.ui.theme.*
 import com.poultryguard.ai.data.model.ageDays
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.poultryguard.ai.R
 import com.poultryguard.ai.data.model.Batch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -280,6 +283,14 @@ fun DashboardContent(
             ) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        Image(
+                            painter = painterResource(id = R.drawable.logo),
+                            contentDescription = "Poultry Guard Logo",
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = stringResource("app_title"),
                             style = Typography.titleLarge,

@@ -103,13 +103,46 @@ class LocalCacheManager(context: Context) {
         cacheFarmEvents(current)
     }
 
+    /**
+     * Smart API Base URL resolver.
+     * - If user has explicitly set a URL in Profile settings → use that.
+     * - If running on Android Emulator → use 10.0.2.2 (emulator's alias for host localhost).
+     * - If running on a physical device (USB or Wi-Fi debugging) → use the host PC's Wi-Fi IP.
+     */
     fun getApiBaseUrl(): String {
-        return prefs.getString("api_base_url", "http://10.0.2.2:5000/") ?: "http://10.0.2.2:5000/"
+        val savedUrl = prefs.getString("api_base_url", null)
+        if (savedUrl != null) return savedUrl
+
+        // Auto-detect based on device type
+        return if (isEmulator()) {
+            "http://10.0.2.2:5000/"        // Android Emulator → host machine via virtual router
+        } else {
+            "http://10.193.0.78:5000/"     // Physical device (USB/Wi-Fi) → host PC's Wi-Fi IP
+        }
     }
 
     fun saveApiBaseUrl(url: String) {
         val formattedUrl = if (url.endsWith("/")) url else "$url/"
         prefs.edit().putString("api_base_url", formattedUrl).apply()
+    }
+
+    fun resetApiBaseUrl() {
+        prefs.edit().remove("api_base_url").apply()
+    }
+
+    /**
+     * Detects whether the app is running on an Android Emulator.
+     */
+    private fun isEmulator(): Boolean {
+        return (android.os.Build.FINGERPRINT.startsWith("generic")
+                || android.os.Build.FINGERPRINT.startsWith("unknown")
+                || android.os.Build.MODEL.contains("google_sdk")
+                || android.os.Build.MODEL.contains("Emulator")
+                || android.os.Build.MODEL.contains("Android SDK built for x86")
+                || android.os.Build.MANUFACTURER.contains("Genymotion")
+                || android.os.Build.BRAND.startsWith("generic")
+                || android.os.Build.DEVICE.startsWith("generic")
+                || "google_sdk" == android.os.Build.PRODUCT)
     }
 
     fun getHardwareKits(): List<HardwareKit> {

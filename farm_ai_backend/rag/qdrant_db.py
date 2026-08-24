@@ -10,7 +10,7 @@ client: QdrantClient = None
 if host and api_key and host != "your_qdrant_cloud_host" and api_key != "your_qdrant_api_key":
     try:
         # Initialize client with Qdrant Cloud URL and API key
-        client = QdrantClient(url=host, api_key=api_key, check_version=False)
+        client = QdrantClient(url=host, api_key=api_key)
         
         # Set lightweight embedding model (all-MiniLM-L6-v2 is standard, fast, and uses minimal memory)
         # Using client.set_model() configures automatic text embedding for both add() and query()

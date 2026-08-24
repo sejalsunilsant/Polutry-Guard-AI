@@ -110,7 +110,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         specialty: String = "",
         qualification: String = "",
         licenseNumber: String = "",
-        experience: Int = 0
+        experience: Int = 0,
+        latitude: Double? = null,
+        longitude: Double? = null
     ) {
         if (name.isBlank() || email.isBlank() || password.isBlank()) {
             _uiState.value = AuthUiState.Error("All fields are required.")
@@ -133,7 +135,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 photoUrl = photoUrl,
                 licenseNumber = licenseNumber,
                 qualification = qualification,
-                experience = experience
+                experience = experience,
+                latitude = latitude,
+                longitude = longitude
             )
             result.fold(
                 onSuccess = { userProfile ->
@@ -150,6 +154,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                                 isOnline = true,
                                 farmName = farmName,
                                 farmLocation = farmLocation,
+                                latitude = latitude,
+                                longitude = longitude,
                                 totalSheds = totalSheds,
                                 floorSpaceSqFt = floorSpaceSqFt,
                                 deviceId = "",
