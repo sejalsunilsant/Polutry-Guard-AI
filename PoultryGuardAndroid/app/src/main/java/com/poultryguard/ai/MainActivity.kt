@@ -46,6 +46,13 @@ import androidx.compose.material.icons.filled.HeartBroken
 import androidx.compose.ui.Alignment
 import com.poultryguard.ai.ui.mortality.MortalityScreen
 import com.poultryguard.ai.ui.mortality.MortalityViewModel
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.*
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -172,6 +179,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun FarmerNavigationContainer(
         userProfile: UserProfile,
@@ -186,6 +194,121 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(
             modifier = Modifier.fillMaxSize(),
+            topBar = {
+                val uiState by dashboardViewModel.uiState.collectAsState()
+                val isMqttConnected = (uiState as? com.poultryguard.ai.ui.dashboard.DashboardUiState.Success)?.isMqttConnected ?: false
+
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(id = R.drawable.logo),
+                                contentDescription = "Poultry Guard Logo",
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = stringResource("app_title"),
+                                    style = Typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = GreenPrimary
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val pulseColor = if (isMqttConnected) GreenPrimary else AlertOrange
+                                    val pulseText = if (isMqttConnected) stringResource("live") else stringResource("mqtt_sync")
+                                    
+                                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                                    val scale by infiniteTransition.animateFloat(
+                                        initialValue = 0.7f,
+                                        targetValue = 1.2f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(1000, easing = FastOutLinearInEasing),
+                                            repeatMode = RepeatMode.Reverse
+                                        ),
+                                        label = "pulse"
+                                    )
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp * scale)
+                                            .clip(CircleShape)
+                                            .background(pulseColor)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = pulseText,
+                                        fontSize = 10.sp,
+                                        color = pulseColor,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    actions = {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(GreenPrimary.copy(alpha = 0.08f))
+                                .border(1.dp, GreenPrimary.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val langPills = listOf(
+                                AppLanguage.ENGLISH to "EN",
+                                AppLanguage.HINDI to "हिंदी",
+                                AppLanguage.MARATHI to "मरा"
+                            )
+                            langPills.forEach { (lang, label) ->
+                                val selected = lang == currentLanguage
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(if (selected) GreenPrimary else Color.Transparent)
+                                        .clickable { onLanguageChanged(lang) }
+                                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = label,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (selected) Color.White else GreenPrimary
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        IconButton(
+                            onClick = {
+                                currentTab = "profile"
+                                navController.navigate("profile") {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Profile",
+                                tint = GreenPrimary
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+            },
             bottomBar = {
                 NavigationBar(
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -250,21 +373,6 @@ class MainActivity : ComponentActivity() {
                         },
                         icon = { Icon(Icons.Default.Visibility, contentDescription = "Guardian") },
                         label = { Text(stringResource("alerts")) }
-                    )
-                    NavigationBarItem(
-                        selected = currentTab == "profile",
-                        onClick = {
-                            currentTab = "profile"
-                            navController.navigate("profile") {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(Icons.Default.Person, contentDescription = "Profile") },
-                        label = { Text(stringResource("profile")) }
                     )
                 }
             }

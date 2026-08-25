@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -49,6 +50,9 @@ import com.poultryguard.ai.data.model.RecurrenceType
 import com.poultryguard.ai.data.model.MortalityRecord
 import com.poultryguard.ai.data.model.ageDays
 import com.poultryguard.ai.data.repository.MortalityRepository
+import com.poultryguard.ai.data.model.Alert
+import com.poultryguard.ai.data.model.VeterinaryCase
+import com.poultryguard.ai.data.model.Consultation
 import com.poultryguard.ai.data.cache.CalendarReminderManager
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -84,6 +88,14 @@ fun AlertsScreen(
     val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(context.applicationContext) }
     var veterinarians by remember { mutableStateOf<List<com.poultryguard.ai.data.model.Veterinarian>>(emptyList()) }
 
+    val caseRepository = remember { com.poultryguard.ai.data.repository.VeterinaryCaseRepository(context.applicationContext) }
+    var veterinaryCases by remember { mutableStateOf<List<com.poultryguard.ai.data.model.VeterinaryCase>>(emptyList()) }
+    var alerts by remember { mutableStateOf<List<com.poultryguard.ai.data.model.Alert>>(emptyList()) }
+    var consultations by remember { mutableStateOf<List<com.poultryguard.ai.data.model.Consultation>>(emptyList()) }
+
+    val cachedUser = remember { cacheManager.getCachedUserProfile() }
+    val farmerId = cachedUser?.uid ?: "farmer_mock_1"
+
     LaunchedEffect(Unit) {
         cachedEvents = cacheManager.getCachedFarmEvents()
     }
@@ -95,6 +107,21 @@ fun AlertsScreen(
     LaunchedEffect(Unit) {
         mortalityRepository.getAllRecordsFlow().collect { records ->
             mortalityRecords = records
+        }
+    }
+    LaunchedEffect(Unit) {
+        caseRepository.getAllCasesFlow().collect { cases ->
+            veterinaryCases = cases
+        }
+    }
+    LaunchedEffect(Unit) {
+        caseRepository.getAllAlertsFlow().collect { list ->
+            alerts = list
+        }
+    }
+    LaunchedEffect(farmerId) {
+        caseRepository.getConsultationsForFarmerFlow(farmerId).collect { consults ->
+            consultations = consults
         }
     }
 
@@ -328,7 +355,18 @@ fun AlertsScreen(
                         notes = "Ammonia: ${record.ammoniaLevel} ppm, Temp: ${record.temperature}°C"
                     )
                 }
-                val allEvents = roomEvents + cachedEvents
+                val consultEvents = consultations.map { consult ->
+                    val consultDateStr = sdfDate.format(Date(consult.dateTime))
+                    FarmEvent(
+                        id = consult.id,
+                        dateStr = consultDateStr,
+                        type = FarmEventType.MEDICINE,
+                        title = "Vet Consultation",
+                        notes = "Clinical Notes: ${consult.notes} (Status: ${consult.status})",
+                        isScheduled = consult.status == "SCHEDULED"
+                    )
+                }
+                val allEvents = roomEvents + consultEvents + cachedEvents
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -571,7 +609,18 @@ fun AlertsScreen(
                         notes = "Ammonia: ${record.ammoniaLevel} ppm, Temp: ${record.temperature}°C"
                     )
                 }
-                val allEvents = roomEvents + cachedEvents
+                val consultEvents = consultations.map { consult ->
+                    val consultDateStr = sdfDate.format(Date(consult.dateTime))
+                    FarmEvent(
+                        id = consult.id,
+                        dateStr = consultDateStr,
+                        type = FarmEventType.MEDICINE,
+                        title = "Vet Consultation",
+                        notes = "Clinical Notes: ${consult.notes} (Status: ${consult.status})",
+                        isScheduled = consult.status == "SCHEDULED"
+                    )
+                }
+                val allEvents = roomEvents + consultEvents + cachedEvents
 
                 val selectedDayEvents = allEvents.filter { event ->
                     val eventDateStr = event.dateStr
@@ -718,6 +767,117 @@ fun AlertsScreen(
                 }
             }
 
+            // Veterinary Cases & Diagnoses List
+            item {
+                Text(
+                    text = "Veterinary Cases & Diagnoses",
+                    style = Typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TextDark
+                )
+            }
+
+            if (veterinaryCases.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = CardSurface)
+                    ) {
+                        Text(
+                            text = "No veterinary review requests registered.",
+                            style = Typography.bodyMedium,
+                            color = TextMedium,
+                            modifier = Modifier.padding(16.dp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                items(veterinaryCases) { case ->
+                    val alert = alerts.find { it.id == case.alertId }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = CardSurface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = alert?.title ?: "Disease Alert Case",
+                                    style = Typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextDark
+                                )
+                                val statusColor = when (case.status) {
+                                    "PENDING" -> AlertOrange
+                                    "ASSIGNED" -> BlueSecondary
+                                    "DIAGNOSED" -> GreenPrimary
+                                    "RESOLVED" -> Color.DarkGray
+                                    else -> TextMedium
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(statusColor.copy(alpha = 0.1f))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = case.status,
+                                        color = statusColor,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            
+                            Text(
+                                text = alert?.description ?: "Awaiting system alert details.",
+                                style = Typography.bodyMedium,
+                                color = TextMedium
+                            )
+
+                            if (case.diagnosis != null || case.treatment != null || case.recommendation != null) {
+                                Divider(color = DividerColor)
+                                Text(
+                                    text = "Clinical Response",
+                                    style = Typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = GreenPrimary
+                                )
+                                if (case.diagnosis != null) {
+                                    Text(text = "• Diagnosis: ${case.diagnosis}", style = Typography.bodySmall, color = TextDark)
+                                }
+                                if (case.treatment != null) {
+                                    Text(text = "• Treatment/Prescription: ${case.treatment}", style = Typography.bodySmall, color = TextDark)
+                                }
+                                if (case.recommendation != null) {
+                                    Text(text = "• Recommendation: ${case.recommendation}", style = Typography.bodySmall, color = TextDark)
+                                }
+                                if (case.followUpInstructions != null) {
+                                    Text(text = "• Follow-up: ${case.followUpInstructions}", style = Typography.bodySmall, color = TextDark)
+                                }
+                            } else {
+                                Text(
+                                    text = "Awaiting clinical investigation from Veterinarian.",
+                                    style = Typography.labelMedium,
+                                    color = AlertOrange,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // Dynamic Diagnostic Summary Cards
             item {
                 val activeBatch = (uiState as? DashboardUiState.Success)?.activeBatch
@@ -854,7 +1014,9 @@ fun AlertsScreen(
                     deviceId = deviceId,
                     farmId = farmId,
                     coroutineScope = coroutineScope,
-                    repo = repo
+                    repo = repo,
+                    caseRepository = caseRepository,
+                    activeBatchId = (uiState as? DashboardUiState.Success)?.activeBatch?.id ?: "batch_default"
                 )
             }
         }
@@ -1166,7 +1328,9 @@ fun GuardianMlDiagnosticsCard(
     deviceId: String,
     farmId: String,
     coroutineScope: kotlinx.coroutines.CoroutineScope,
-    repo: com.poultryguard.ai.data.api.DiseasePredictionRepository
+    repo: com.poultryguard.ai.data.api.DiseasePredictionRepository,
+    caseRepository: com.poultryguard.ai.data.repository.VeterinaryCaseRepository,
+    activeBatchId: String
 ) {
     var selectedImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var selectedSoundUri by remember { mutableStateOf<android.net.Uri?>(null) }
@@ -1472,6 +1636,46 @@ fun GuardianMlDiagnosticsCard(
                         style = Typography.bodyMedium,
                         color = TextDark.copy(alpha = 0.9f)
                     )
+
+                    if (result.riskLevel == com.poultryguard.ai.data.api.DiseaseRiskLevel.MEDIUM ||
+                        result.riskLevel == com.poultryguard.ai.data.api.DiseaseRiskLevel.HIGH
+                    ) {
+                        var reviewRequested by remember { mutableStateOf(false) }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    try {
+                                        val alert = caseRepository.createAlert(
+                                            batchId = activeBatchId,
+                                            deviceId = deviceId,
+                                            predictionId = System.currentTimeMillis(),
+                                            title = "${result.condition} Risk Warning",
+                                            description = "AI Diagnostic detected ${result.condition} with ${(result.confidence * 100).toInt()}% confidence. Recommendation: ${result.recommendation}",
+                                            severity = result.riskLevel.name
+                                        )
+                                        caseRepository.requestVeterinaryReview(alert.id)
+                                        reviewRequested = true
+                                        Toast.makeText(context, "Veterinarian review requested successfully!", Toast.LENGTH_SHORT).show()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Failed to request review: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AlertOrange),
+                            enabled = !reviewRequested
+                        ) {
+                            Text(
+                                text = if (reviewRequested) "Review Requested" else "Request Vet Review",
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(

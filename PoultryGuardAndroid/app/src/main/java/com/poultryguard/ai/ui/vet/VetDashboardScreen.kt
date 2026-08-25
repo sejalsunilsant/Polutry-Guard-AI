@@ -89,6 +89,9 @@ fun VetDashboardScreen(
     // Seed mock data if empty
     LaunchedEffect(Unit) {
         coroutineScope.launch {
+            vetRepository.syncVeterinarians()
+        }
+        coroutineScope.launch {
             if (allFarmers.isEmpty()) {
                 // Seed a mock farmer
                 val mockFarmer = FarmerProfile(
@@ -141,6 +144,31 @@ fun VetDashboardScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = AppBackground,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Poultry Guard Clinician",
+                        fontWeight = FontWeight.Bold,
+                        color = GreenPrimary
+                    )
+                },
+                actions = {
+                    IconButton(
+                        onClick = { currentTab = "profile" }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "Profile",
+                            tint = GreenPrimary
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = CardSurface
+                )
+            )
+        },
         bottomBar = {
             NavigationBar(
                 containerColor = CardSurface,
@@ -169,12 +197,6 @@ fun VetDashboardScreen(
                     onClick = { currentTab = "consults" },
                     icon = { Icon(Icons.Default.Event, contentDescription = "Consults") },
                     label = { Text("Consults") }
-                )
-                NavigationBarItem(
-                    selected = currentTab == "profile",
-                    onClick = { currentTab = "profile" },
-                    icon = { Icon(Icons.Default.Person, contentDescription = "Profile") },
-                    label = { Text("Profile") }
                 )
             }
         }
@@ -1255,15 +1277,8 @@ fun ProfileView(
                     Text("Loading profile logs...")
                 }
             } else {
-                // Interactive profile updates form fields
+                // Read-only profile details display
                 item {
-                    var specialty by remember { mutableStateOf(currentVet.specialty) }
-                    var phone by remember { mutableStateOf(currentVet.phone) }
-                    var location by remember { mutableStateOf(currentVet.location) }
-                    var qualification by remember { mutableStateOf(currentVet.qualification) }
-                    var license by remember { mutableStateOf(currentVet.licenseNumber) }
-                    var experience by remember { mutableStateOf(currentVet.experience.toString()) }
-
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
@@ -1292,70 +1307,12 @@ fun ProfileView(
 
                             Divider(color = DividerColor)
 
-                            OutlinedTextField(
-                                value = phone,
-                                onValueChange = { phone = it },
-                                label = { Text("Contact Phone") },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            OutlinedTextField(
-                                value = specialty,
-                                onValueChange = { specialty = it },
-                                label = { Text("Clinical Specialization") },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            OutlinedTextField(
-                                value = qualification,
-                                onValueChange = { qualification = it },
-                                label = { Text("Qualification Degree") },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            OutlinedTextField(
-                                value = license,
-                                onValueChange = { license = it },
-                                label = { Text("Veterinary License Number") },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            OutlinedTextField(
-                                value = experience,
-                                onValueChange = { experience = it },
-                                label = { Text("Years of Experience") },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            OutlinedTextField(
-                                value = location,
-                                onValueChange = { location = it },
-                                label = { Text("Operating Region / Location") },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            Button(
-                                onClick = {
-                                    coroutineScope.launch {
-                                        vetRepository.updateProfile(
-                                            id = currentVet.id,
-                                            phone = phone,
-                                            specialty = specialty,
-                                            location = location,
-                                            qualification = qualification,
-                                            licenseNumber = license,
-                                            experience = experience.toIntOrNull() ?: currentVet.experience
-                                        )
-                                        Toast.makeText(context, "Profile details successfully updated!", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Update Profile Settings")
-                            }
+                            VetProfileDetailRow(label = "Contact Phone", value = currentVet.phone)
+                            VetProfileDetailRow(label = "Clinical Specialization", value = currentVet.specialty)
+                            VetProfileDetailRow(label = "Qualification Degree", value = currentVet.qualification)
+                            VetProfileDetailRow(label = "Veterinary License Number", value = currentVet.licenseNumber)
+                            VetProfileDetailRow(label = "Years of Experience", value = "${currentVet.experience} Years")
+                            VetProfileDetailRow(label = "Operating Region / Location", value = currentVet.location)
                         }
                     }
                 }
@@ -1770,5 +1727,14 @@ fun AcousticDiagnosticsCard(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun VetProfileDetailRow(label: String, value: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(text = label, style = Typography.labelMedium, color = TextMedium)
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(text = value.ifBlank { "Not Provided" }, style = Typography.bodyMedium, fontWeight = FontWeight.Bold, color = TextDark)
     }
 }
