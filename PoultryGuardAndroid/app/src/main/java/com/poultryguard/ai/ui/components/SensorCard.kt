@@ -80,8 +80,8 @@ fun SensorCard(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = 18.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
-                verticalArrangement = Arrangement.SpaceBetween
+                    .padding(start = 18.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Header: Icon + Name + Status Pill
                 Row(
@@ -89,10 +89,13 @@ fun SensorCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
+                                .size(28.dp)
                                 .clip(CircleShape)
                                 .background(statusBg),
                             contentAlignment = Alignment.Center
@@ -101,7 +104,7 @@ fun SensorCard(
                                 imageVector = icon,
                                 contentDescription = reading.name,
                                 tint = statusColor,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
@@ -109,9 +112,12 @@ fun SensorCard(
                             text = reading.name,
                             style = Typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = TextDark
+                            color = TextDark,
+                            maxLines = 1
                         )
                     }
+
+                    Spacer(modifier = Modifier.width(4.dp))
 
                     // Status Pill
                     Box(
@@ -123,9 +129,10 @@ fun SensorCard(
                     ) {
                         Text(
                             text = statusLabel,
-                            style = Typography.labelMedium,
+                            style = Typography.labelSmall,
                             color = statusColor,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
                         )
                     }
                 }
@@ -151,15 +158,6 @@ fun SensorCard(
                         modifier = Modifier.padding(bottom = 3.dp)
                     )
                 }
-
-                // Bottom Status Description
-                Text(
-                    text = reading.description,
-                    style = Typography.bodyMedium,
-                    color = if (reading.status != SensorStatus.IDEAL) statusColor else TextMedium,
-                    fontWeight = if (reading.status != SensorStatus.IDEAL) FontWeight.Medium else FontWeight.Normal,
-                    maxLines = 1
-                )
             }
         }
     }

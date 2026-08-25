@@ -134,8 +134,8 @@ fun BatchHistoryItem(batch: Batch, modifier: Modifier = Modifier) {
     }
 
     val mortRate = if (batch.initialCount > 0) {
-        ((batch.initialCount - batch.currentCount).toFloat() / batch.initialCount * 100).toInt().coerceAtLeast(0)
-    } else 0
+        ((batch.initialCount - batch.currentCount).toFloat() / batch.initialCount * 100).coerceAtLeast(0f)
+    } else 0f
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -222,10 +222,10 @@ fun BatchHistoryItem(batch: Batch, modifier: Modifier = Modifier) {
                         color = TextMedium
                     )
                     Text(
-                        text = "$mortRate%",
+                        text = "%.2f%%".format(mortRate),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (mortRate > 10) AlertRed else AlertOrange
+                        color = if (mortRate > 10.0f) AlertRed else AlertOrange
                     )
                 }
             }

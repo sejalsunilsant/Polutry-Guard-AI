@@ -274,101 +274,7 @@ fun DashboardContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp) // Avoid FAB overlaying elements
     ) {
-        // Welcomes, Profile, and Language Switcher
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painter = painterResource(id = R.drawable.logo),
-                            contentDescription = "Poultry Guard Logo",
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = stringResource("app_title"),
-                            style = Typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = GreenPrimary
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        
-                        // Live Pulse Dot
-                        val pulseColor = if (state.isMqttConnected) GreenPrimary else AlertOrange
-                        val pulseText = if (state.isMqttConnected) stringResource("live") else stringResource("mqtt_sync")
-                        
-                        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                        val scale by infiniteTransition.animateFloat(
-                            initialValue = 0.7f,
-                            targetValue = 1.2f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(1000, easing = FastOutLinearInEasing),
-                                repeatMode = RepeatMode.Reverse
-                            ),
-                            label = "pulse"
-                        )
 
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp * scale)
-                                .clip(CircleShape)
-                                .background(pulseColor)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = pulseText,
-                            style = Typography.labelMedium,
-                            color = pulseColor,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Text(
-                        text = "${stringResource("welcome_prefix")}$farmerName",
-                        style = Typography.headlineMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                // In-App Multi-language Switcher Pill (Visual Masterpiece)
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(GreenPrimary.copy(alpha = 0.08f))
-                        .border(1.dp, GreenPrimary.copy(alpha = 0.2f), RoundedCornerShape(20.dp))
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                ) {
-                    val langPills = listOf(
-                        AppLanguage.ENGLISH to "EN",
-                        AppLanguage.HINDI to "हिंदी",
-                        AppLanguage.MARATHI to "मरा"
-                    )
-                    langPills.forEach { (lang, label) ->
-                        val selected = lang == currentLanguage
-                        Box(
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(if (selected) GreenPrimary else Color.Transparent)
-                                .clickable { onLanguageChanged(lang) }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = label,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (selected) Color.White else GreenPrimary
-                            )
-                        }
-                    }
-                }
-            }
-        }
 
         // Live AI Disease Risk Level Indicator Widget
         item {
@@ -607,10 +513,10 @@ fun DashboardContent(
                                     color = TextMedium
                                 )
                                 val mortRate = if (batch.initialCount > 0) {
-                                    ((batch.initialCount - state.birdCount).toFloat() / batch.initialCount * 100).toInt().coerceAtLeast(0)
-                                } else 0
+                                    ((batch.initialCount - state.birdCount).toFloat() / batch.initialCount * 100).coerceAtLeast(0f)
+                                } else 0f
                                 Text(
-                                    text = "$mortRate%",
+                                    text = "%.2f%%".format(mortRate),
                                     style = Typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = AlertRed

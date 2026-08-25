@@ -187,13 +187,20 @@ class BatchRepository(private val context: Context) {
                 throw Exception("Mortality count ($deathCount) cannot exceed current batch count (${cachedBatch.currentCount}).")
             }
 
+            val cachedProfile = cacheManager.getCachedUserProfile()
+            val resolvedRecordedBy = if (recordedBy == "Farmer" && cachedProfile != null) {
+                if (cachedProfile.name.isNotBlank()) cachedProfile.name else if (cachedProfile.email.isNotBlank()) cachedProfile.email else cachedProfile.uid
+            } else {
+                recordedBy
+            }
+
             val record = com.poultryguard.ai.data.model.MortalityRecord(
                 id = UUID.randomUUID().toString(),
                 deathCount = deathCount,
                 reason = reason,
                 notes = notes,
                 timestamp = System.currentTimeMillis(),
-                recordedBy = recordedBy,
+                recordedBy = resolvedRecordedBy,
                 symptoms = notes ?: "Unspecified",
                 suspectedCause = reason,
                 batchId = batchId,

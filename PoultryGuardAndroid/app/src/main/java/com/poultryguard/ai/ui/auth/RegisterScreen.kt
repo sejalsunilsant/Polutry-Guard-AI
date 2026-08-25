@@ -36,6 +36,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.poultryguard.ai.data.model.UserRole
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.poultryguard.ai.R
 import com.poultryguard.ai.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,6 +60,8 @@ fun RegisterScreen(
     // Farm Information fields for Farmers
     var farmName by remember { mutableStateOf("") }
     var farmLocation by remember { mutableStateOf("") }
+    var latitude by remember { mutableStateOf("") }
+    var longitude by remember { mutableStateOf("") }
     var totalSheds by remember { mutableStateOf("") }
     var floorSpace by remember { mutableStateOf("") }
 
@@ -84,6 +89,8 @@ fun RegisterScreen(
     // Farmer-specific field errors
     var farmNameError by remember { mutableStateOf<String?>(null) }
     var farmLocationError by remember { mutableStateOf<String?>(null) }
+    var latitudeError by remember { mutableStateOf<String?>(null) }
+    var longitudeError by remember { mutableStateOf<String?>(null) }
     var totalShedsError by remember { mutableStateOf<String?>(null) }
     var floorSpaceError by remember { mutableStateOf<String?>(null) }
 
@@ -105,6 +112,8 @@ fun RegisterScreen(
         confirmPasswordError = null
         farmNameError = null
         farmLocationError = null
+        latitudeError = null
+        longitudeError = null
         totalShedsError = null
         floorSpaceError = null
         validationError = null
@@ -153,6 +162,14 @@ fun RegisterScreen(
                 farmLocationError = "Farm Location is required."
                 isValid = false
             }
+            if (latitude.isNotBlank() && latitude.toDoubleOrNull() == null) {
+                latitudeError = "Latitude must be a valid number."
+                isValid = false
+            }
+            if (longitude.isNotBlank() && longitude.toDoubleOrNull() == null) {
+                longitudeError = "Longitude must be a valid number."
+                isValid = false
+            }
             if (totalSheds.isNotBlank() && totalSheds.toIntOrNull() == null) {
                 totalShedsError = "Sheds count must be an integer number."
                 isValid = false
@@ -182,6 +199,15 @@ fun RegisterScreen(
             // Specialty
             if (specialty.isBlank()) {
                 specialtyError = "Specialty is required."
+                isValid = false
+            }
+
+            if (latitude.isNotBlank() && latitude.toDoubleOrNull() == null) {
+                latitudeError = "Latitude must be a valid number."
+                isValid = false
+            }
+            if (longitude.isNotBlank() && longitude.toDoubleOrNull() == null) {
+                longitudeError = "Longitude must be a valid number."
                 isValid = false
             }
 
@@ -234,6 +260,17 @@ fun RegisterScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
+                // Brand Header Logo
+                Image(
+                    painter = painterResource(id = R.drawable.logo),
+                    contentDescription = "Poultry Guard Logo",
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 // Header
                 Text(
                     text = "Create Account",
@@ -398,17 +435,67 @@ fun RegisterScreen(
                                 modifier = Modifier.fillMaxWidth()
                             )
 
-                            OutlinedTextField(
-                                value = farmLocation,
-                                onValueChange = { farmLocation = it; farmLocationError = null },
-                                label = { Text("Farm Location") },
-                                isError = farmLocationError != null,
-                                supportingText = farmLocationError?.let { { Text(it) } },
-                                leadingIcon = { Icon(Icons.Default.Place, contentDescription = "Location", tint = GreenPrimary) },
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                             OutlinedTextField(
+                                 value = farmLocation,
+                                 onValueChange = { farmLocation = it; farmLocationError = null },
+                                 label = { Text("Farm Location Address") },
+                                 isError = farmLocationError != null,
+                                 supportingText = farmLocationError?.let { { Text(it) } },
+                                 leadingIcon = { Icon(Icons.Default.Place, contentDescription = "Location", tint = GreenPrimary) },
+                                 singleLine = true,
+                                 shape = RoundedCornerShape(12.dp),
+                                 modifier = Modifier.fillMaxWidth()
+                             )
+
+                             Row(
+                                 modifier = Modifier.fillMaxWidth(),
+                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
+                             ) {
+                                 OutlinedTextField(
+                                     value = latitude,
+                                     onValueChange = { latitude = it; latitudeError = null },
+                                     label = { Text("Latitude") },
+                                     isError = latitudeError != null,
+                                     supportingText = latitudeError?.let { { Text(it) } },
+                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                     singleLine = true,
+                                     shape = RoundedCornerShape(12.dp),
+                                     modifier = Modifier.weight(1f)
+                                 )
+                                 OutlinedTextField(
+                                     value = longitude,
+                                     onValueChange = { longitude = it; longitudeError = null },
+                                     label = { Text("Longitude") },
+                                     isError = longitudeError != null,
+                                     supportingText = longitudeError?.let { { Text(it) } },
+                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                     singleLine = true,
+                                     shape = RoundedCornerShape(12.dp),
+                                     modifier = Modifier.weight(1f)
+                                 )
+                             }
+
+                             Button(
+                                 onClick = {
+                                     val randomOffsetLat = (Math.random() - 0.5) * 0.1
+                                     val randomOffsetLng = (Math.random() - 0.5) * 0.1
+                                     val latVal = 18.5204 + randomOffsetLat
+                                     val lngVal = 73.8567 + randomOffsetLng
+                                     latitude = String.format(java.util.Locale.US, "%.6f", latVal)
+                                     longitude = String.format(java.util.Locale.US, "%.6f", lngVal)
+                                     farmLocation = "Pune Sector " + (1..10).random()
+                                     farmLocationError = null
+                                     latitudeError = null
+                                     longitudeError = null
+                                 },
+                                 colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary.copy(alpha = 0.08f), contentColor = GreenPrimary),
+                                 shape = RoundedCornerShape(8.dp),
+                                 modifier = Modifier.fillMaxWidth()
+                             ) {
+                                 Icon(Icons.Default.Place, contentDescription = "GPS", modifier = Modifier.size(16.dp))
+                                 Spacer(modifier = Modifier.width(6.dp))
+                                 Text("Get Current GPS Location", fontSize = 12.sp)
+                             }
 
                             OutlinedTextField(
                                 value = totalSheds,
@@ -525,7 +612,7 @@ fun RegisterScreen(
                             OutlinedTextField(
                                 value = location,
                                 onValueChange = { location = it; locationError = null },
-                                label = { Text("Location / City") },
+                                label = { Text("Location / City Address") },
                                 isError = locationError != null,
                                 supportingText = locationError?.let { { Text(it) } },
                                 leadingIcon = { Icon(Icons.Default.Place, contentDescription = "Location", tint = GreenPrimary) },
@@ -533,6 +620,56 @@ fun RegisterScreen(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth()
                             )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = latitude,
+                                    onValueChange = { latitude = it; latitudeError = null },
+                                    label = { Text("Latitude") },
+                                    isError = latitudeError != null,
+                                    supportingText = latitudeError?.let { { Text(it) } },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = longitude,
+                                    onValueChange = { longitude = it; longitudeError = null },
+                                    label = { Text("Longitude") },
+                                    isError = longitudeError != null,
+                                    supportingText = longitudeError?.let { { Text(it) } },
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            Button(
+                                onClick = {
+                                    val randomOffsetLat = (Math.random() - 0.5) * 0.1
+                                    val randomOffsetLng = (Math.random() - 0.5) * 0.1
+                                    val latVal = 18.5204 + randomOffsetLat
+                                    val lngVal = 73.8567 + randomOffsetLng
+                                    latitude = String.format(java.util.Locale.US, "%.6f", latVal)
+                                    longitude = String.format(java.util.Locale.US, "%.6f", lngVal)
+                                    location = "Pune Sector " + (1..10).random()
+                                    locationError = null
+                                    latitudeError = null
+                                    longitudeError = null
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary.copy(alpha = 0.08f), contentColor = GreenPrimary),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Place, contentDescription = "GPS", modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Get Current GPS Location", fontSize = 12.sp)
+                            }
 
                             OutlinedTextField(
                                 value = photoUrl,
@@ -630,7 +767,9 @@ fun RegisterScreen(
                                             farmName = farmName,
                                             farmLocation = farmLocation,
                                             totalSheds = totalSheds.toIntOrNull() ?: 0,
-                                            floorSpaceSqFt = floorSpace.toIntOrNull() ?: 0
+                                            floorSpaceSqFt = floorSpace.toIntOrNull() ?: 0,
+                                            latitude = latitude.toDoubleOrNull(),
+                                            longitude = longitude.toDoubleOrNull()
                                         )
                                     } else {
                                         viewModel.register(
@@ -644,7 +783,9 @@ fun RegisterScreen(
                                             specialty = specialty,
                                             qualification = qualification,
                                             licenseNumber = licenseNumber,
-                                            experience = experience.toIntOrNull() ?: 0
+                                            experience = experience.toIntOrNull() ?: 0,
+                                            latitude = latitude.toDoubleOrNull(),
+                                            longitude = longitude.toDoubleOrNull()
                                         )
                                     }
                                 }

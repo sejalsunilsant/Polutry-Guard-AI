@@ -9,6 +9,9 @@ interface ConsultationDao {
     @Query("SELECT * FROM consultations WHERE veterinarianId = :vetId ORDER BY dateTime ASC")
     fun getConsultationsForVetFlow(vetId: String): Flow<List<Consultation>>
 
+    @Query("SELECT * FROM consultations WHERE farmerId = :farmerId ORDER BY dateTime ASC")
+    fun getConsultationsForFarmerFlow(farmerId: String): Flow<List<Consultation>>
+
     @Query("SELECT * FROM consultations WHERE id = :id LIMIT 1")
     suspend fun getConsultationById(id: String): Consultation?
 

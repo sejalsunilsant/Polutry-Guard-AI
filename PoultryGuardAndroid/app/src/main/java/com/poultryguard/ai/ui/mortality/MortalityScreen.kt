@@ -43,6 +43,17 @@ fun MortalityScreen(
     val isSubmitting by viewModel.isSubmitting.collectAsState()
     val submissionSuccess by viewModel.submissionSuccess.collectAsState()
 
+    val cacheManager = remember { com.poultryguard.ai.data.cache.LocalCacheManager(context.applicationContext) }
+    val activeBatch = remember(submissionSuccess) { cacheManager.getCachedActiveBatch() }
+    val activeBatchId = activeBatch?.id ?: ""
+    val filteredRecords = remember(records, activeBatchId) {
+        if (activeBatchId.isNotBlank()) {
+            records.filter { it.batchId == activeBatchId }
+        } else {
+            records
+        }
+    }
+
     // Form inputs state
     var deathCount by remember { mutableStateOf(1) }
     val symptomsList = listOf("Respiratory Snick", "Lethargy", "Loose Droppings", "Sudden Death")
@@ -56,16 +67,20 @@ fun MortalityScreen(
     var expandedRecordId by remember { mutableStateOf<String?>(null) }
 
     // Dynamic stats computation
-    val totalDeaths = records.sumOf { it.deathCount }
-    val avgTemp = if (records.isNotEmpty()) records.map { it.temperature }.average().toFloat() else 0f
-    val avgAmmonia = if (records.isNotEmpty()) records.map { it.ammoniaLevel }.average().toFloat() else 0f
-    val avgHumid = if (records.isNotEmpty()) records.map { it.humidity }.average().toFloat() else 0f
-    val avgSound = if (records.isNotEmpty()) records.map { it.soundLevel }.average().toFloat() else 0f
+    val totalDeaths = filteredRecords.sumOf { it.deathCount }
+    val avgTemp = if (filteredRecords.isNotEmpty()) filteredRecords.map { it.temperature }.average().toFloat() else 0f
+    val avgAmmonia = if (filteredRecords.isNotEmpty()) filteredRecords.map { it.ammoniaLevel }.average().toFloat() else 0f
+    val avgHumid = if (filteredRecords.isNotEmpty()) filteredRecords.map { it.humidity }.average().toFloat() else 0f
+    val avgSound = if (filteredRecords.isNotEmpty()) filteredRecords.map { it.soundLevel }.average().toFloat() else 0f
 
-    val topCause = if (records.isNotEmpty()) {
-        records.groupBy { it.suspectedCause }
+    val topCause = if (filteredRecords.isNotEmpty()) {
+        filteredRecords.groupBy { it.suspectedCause }
             .maxByOrNull { it.value.sumOf { r -> r.deathCount } }?.key ?: "None"
     } else "None"
+
+    val mortRate = if (activeBatch != null && activeBatch.initialCount > 0) {
+        (totalDeaths.toFloat() / activeBatch.initialCount * 100).coerceAtLeast(0f)
+    } else 0f
 
     val uiError by viewModel.uiError.collectAsState()
 
@@ -388,7 +403,7 @@ fun MortalityScreen(
                         Spacer(modifier = Modifier.width(16.dp))
                         Column {
                             Text("Total Logged Deaths", fontSize = 12.sp, color = TextMedium, fontWeight = FontWeight.Medium)
-                            Text("$totalDeaths birds", fontSize = 20.sp, color = TextDark, fontWeight = FontWeight.Bold)
+                            Text("$totalDeaths birds (%.2f%%)".format(mortRate), fontSize = 20.sp, color = TextDark, fontWeight = FontWeight.Bold)
                         }
                         Spacer(modifier = Modifier.weight(1f))
                         Column(horizontalAlignment = Alignment.End) {
@@ -399,7 +414,7 @@ fun MortalityScreen(
                 }
 
                 // Average Environmental Snapshot Indicators during incidents
-                if (records.isNotEmpty()) {
+                if (filteredRecords.isNotEmpty()) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
@@ -433,7 +448,7 @@ fun MortalityScreen(
         // Section 3: Expandable History logs
         item {
             Text(
-                text = "Flock Mortality Logs (${records.size})",
+                text = "Flock Mortality Logs (${filteredRecords.size})",
                 style = Typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = TextDark,
@@ -441,7 +456,7 @@ fun MortalityScreen(
             )
         }
 
-        if (records.isEmpty()) {
+        if (filteredRecords.isEmpty()) {
             item {
                 Card(
                     modifier = Modifier
@@ -466,7 +481,7 @@ fun MortalityScreen(
                 }
             }
         } else {
-            items(records) { record ->
+            items(filteredRecords) { record ->
                 val isExpanded = expandedRecordId == record.id
                 val dateFormat = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
                 val timeStr = dateFormat.format(Date(record.timestamp))

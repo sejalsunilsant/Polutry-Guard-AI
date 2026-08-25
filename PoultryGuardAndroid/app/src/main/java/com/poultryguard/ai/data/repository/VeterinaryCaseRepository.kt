@@ -78,6 +78,9 @@ class VeterinaryCaseRepository(context: Context) {
     fun getConsultationsForVetFlow(vetId: String): Flow<List<com.poultryguard.ai.data.model.Consultation>> =
         consultationDao.getConsultationsForVetFlow(vetId)
 
+    fun getConsultationsForFarmerFlow(farmerId: String): Flow<List<com.poultryguard.ai.data.model.Consultation>> =
+        consultationDao.getConsultationsForFarmerFlow(farmerId)
+
     fun getAllMortalityRecordsFlow(): Flow<List<com.poultryguard.ai.data.model.MortalityRecord>> =
         mortalityDao.getAllRecordsFlow()
 
