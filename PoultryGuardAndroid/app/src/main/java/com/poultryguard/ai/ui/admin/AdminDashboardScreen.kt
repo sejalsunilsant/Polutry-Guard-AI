@@ -40,6 +40,7 @@ import com.poultryguard.ai.ui.theme.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.firstOrNull
 
 
 
@@ -88,6 +89,19 @@ fun AdminDashboardScreen(
 
     val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(context) }
     val vetsListState by vetRepository.getVeterinariansFlow().collectAsState(initial = emptyList())
+
+    LaunchedEffect(farmersListState, vetsListState) {
+        val current = statsDao.getSystemStats().firstOrNull() ?: com.poultryguard.ai.data.model.SystemStats()
+        statsDao.insertOrUpdate(current.copy(
+            totalFarmers = farmersListState.size,
+            activeFarmers = farmersListState.count { it.accountStatus == "Active" },
+            registeredVets = vetsListState.size,
+            activeVets = vetsListState.count { it.verificationStatus == "VERIFIED" },
+            totalFarms = farmersListState.map { it.farmName }.distinct().count { it.isNotBlank() },
+            activeFarms = farmersListState.filter { it.isOnline }.map { it.farmName }.distinct().count { it.isNotBlank() }
+        ))
+    }
+
     var selectedVet by remember { mutableStateOf<com.poultryguard.ai.data.model.Veterinarian?>(null) }
     val authRepository = remember { com.poultryguard.ai.data.repository.SupabaseAuthRepository(context) }
     LaunchedEffect(Unit) {

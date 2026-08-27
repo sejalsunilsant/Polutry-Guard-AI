@@ -259,6 +259,7 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                 val farmers = response.data.map { dto ->
                     val farmMember = dto.farmMembers?.firstOrNull()
                     val farm = farmMember?.farms
+                    val activeBatch = farm?.batches?.firstOrNull { it.status == "ACTIVE" }
                     com.poultryguard.ai.data.model.FarmerProfile(
                         id = dto.id,
                         name = dto.name,
@@ -276,7 +277,7 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                         deviceId = "",
                         deviceSerial = "",
                         firmwareVersion = "",
-                        activeBatchId = "",
+                        activeBatchId = activeBatch?.id ?: "",
                         activeBatchStartDate = "",
                         chickAgeDays = 0,
                         feedConsumedKg = 0.0f,
@@ -389,9 +390,27 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                         verificationStatus = existing?.verificationStatus ?: "VERIFIED",
                         licenseNumber = dto.licenseNumber ?: existing?.licenseNumber ?: "",
                         qualification = dto.qualification ?: existing?.qualification ?: "",
-                        experience = dto.experience ?: existing?.experience ?: 0
+                        experience = dto.experience ?: existing?.experience ?: 0,
+                        latitude = dto.latitude ?: existing?.latitude,
+                        longitude = dto.longitude ?: existing?.longitude
                     )
                     db.vetDao().insert(newVet)
+                }
+
+                // Autoritative role cache update for all logged-in profiles
+                val cachedProfile = cacheManager.getCachedUserProfile()
+                if (cachedProfile != null && cachedProfile.uid == dto.profileId) {
+                    val targetRole = when (dto.role.uppercase()) {
+                        "VETERINARIAN" -> com.poultryguard.ai.data.model.UserRole.VETERINARIAN
+                        "ADMIN" -> com.poultryguard.ai.data.model.UserRole.ADMIN
+                        "SUPER_ADMIN" -> com.poultryguard.ai.data.model.UserRole.ADMIN
+                        else -> com.poultryguard.ai.data.model.UserRole.FARMER
+                    }
+                    cacheManager.cacheUserProfile(cachedProfile.copy(
+                        role = targetRole,
+                        farmName = dto.farmName ?: cachedProfile.farmName,
+                        farmId = dto.farmId ?: cachedProfile.farmId
+                    ))
                 }
                 Result.success(dto)
             } else {

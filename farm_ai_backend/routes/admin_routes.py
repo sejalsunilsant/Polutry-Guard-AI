@@ -3,12 +3,12 @@ from flask import Blueprint, request, jsonify
 admin_bp = Blueprint("admin_bp", __name__)
 
 
-@admin_bp.route("/api/v1/admin/kits", methods=["POST"])
+@admin_bp.route("/admin/kits", methods=["POST"])
 def create_kit():
     """
     Register a new IoT device kit in Supabase.
     Kit is created without a farm assignment (farm_id = NULL).
-    Assignment is a separate step via POST /api/v1/admin/kits/assign.
+    Assignment is a separate step via POST /admin/kits/assign.
 
     Required: deviceId
     Optional: name (derived from kitId if absent), kitId, serialNumber,
@@ -71,7 +71,7 @@ def create_kit():
         return jsonify({"status": "error", "message": "Internal server error: {}".format(str(e))}), 500
 
 
-@admin_bp.route("/api/v1/admin/kits/assign", methods=["POST"])
+@admin_bp.route("/admin/kits/assign", methods=["POST"])
 def assign_kit():
     """
     Assign a device kit to a farmer's farm.
@@ -132,7 +132,7 @@ def assign_kit():
         return jsonify({"status": "error", "message": "Internal server error: {}".format(str(e))}), 500
 
 
-@admin_bp.route("/api/v1/admin/kits", methods=["GET"])
+@admin_bp.route("/admin/kits", methods=["GET"])
 def list_kits():
     """
     Fetch all registered device kits from Supabase for the admin panel.

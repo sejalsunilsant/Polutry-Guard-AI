@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.poultryguard.ai.ui.dashboard.DashboardViewModel
 import com.poultryguard.ai.ui.theme.*
+import com.poultryguard.ai.ui.localization.*
 import java.text.SimpleDateFormat
 import java.util.*
 

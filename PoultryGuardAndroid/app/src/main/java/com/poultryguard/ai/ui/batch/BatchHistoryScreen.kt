@@ -27,6 +27,7 @@ import com.poultryguard.ai.data.repository.BatchRepository
 import com.poultryguard.ai.data.cache.LocalCacheManager
 import com.poultryguard.ai.data.cache.AppDatabase
 import com.poultryguard.ai.ui.theme.*
+import com.poultryguard.ai.ui.localization.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

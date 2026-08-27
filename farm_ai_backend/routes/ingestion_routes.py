@@ -14,7 +14,7 @@ from ml.fusion.decision_engine import fuse_and_store
 
 ingestion_bp = Blueprint("ingestion_bp", __name__)
 
-@ingestion_bp.route('/api/v1/ingest/thingspeak', methods=['POST'])
+@ingestion_bp.route('/ingest/thingspeak', methods=['POST'])
 def ingest_thingspeak():
     """
     Ingest latest data from ThingSpeak for a given device and farm,
@@ -132,7 +132,7 @@ def ingest_thingspeak():
         return jsonify({'error': f"Internal server error: {str(e)}"}), 500
 
 
-@ingestion_bp.route('/api/v1/device/configure-thingspeak', methods=['POST'])
+@ingestion_bp.route('/device/configure-thingspeak', methods=['POST'])
 def configure_device_thingspeak():
     """
     Endpoint for a farmer to configure or update the ThingSpeak credentials for their device.
@@ -166,7 +166,7 @@ def configure_device_thingspeak():
         return jsonify({'error': f"Internal server error: {str(e)}"}), 500
 
 
-@ingestion_bp.route('/api/v1/device/configure-wifi', methods=['POST'])
+@ingestion_bp.route('/device/configure-wifi', methods=['POST'])
 def configure_device_wifi():
     """
     Endpoint for a farmer to upload and save Wi-Fi configuration details in the database.

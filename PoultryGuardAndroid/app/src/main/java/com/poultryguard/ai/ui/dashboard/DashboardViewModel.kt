@@ -281,7 +281,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 currentSoundLevel = currentSound ?: 0f,
                 birdCount = dynamicBirdCount,
                 loggedMortalities = unsyncedMortalities,
-                activeShed = currentBatch?.let { "${it.id} (${it.breed})" } ?: "No Active Batch"
+                activeShed = currentBatch?.let { "${it.id} (${it.breed})" } ?: "No Active Batch",
+                farmerId = farmerId.ifBlank { null },
+                farmId = farmId.ifBlank { null },
+                batchId = currentBatch?.id
             )
 
             // Dynamic background completion request

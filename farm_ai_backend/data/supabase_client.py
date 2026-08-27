@@ -80,6 +80,8 @@ class SupabaseProxy:
 supabase = SupabaseProxy()
 _mock_batches = {}
 _mock_mortality = []
+_mock_alerts = []
+_mock_cases = []
 _mock_veterinarians = {
     "vet_1": {
         "id": "vet_1",
@@ -1522,7 +1524,7 @@ def get_all_farmers():
         return []
     try:
         res = supabase.table("profiles")\
-            .select("*, farm_members(farm_id, farms(*))")\
+            .select("*, farm_members(farm_id, farms(*, batches(*)))")\
             .eq("role", "FARMER")\
             .execute()
         data = res.data or []
@@ -1922,3 +1924,173 @@ def save_device_wifi_config(device_id: str, ssid: str, password: str, farmer_id:
     except Exception as e:
         print(f"[Supabase Error] save_device_wifi_config failed: {e}")
         return {"status": "error", "message": str(e)}
+
+
+def get_alerts(batch_id=None):
+    if not supabase:
+        if batch_id:
+            return [a for a in _mock_alerts if a.get("batch_id") == batch_id]
+        return _mock_alerts
+    try:
+        query = supabase.table("alerts").select("*")
+        if batch_id:
+            query = query.eq("batch_id", batch_id)
+        res = query.order("created_at", desc=True).execute()
+        data = res.data or []
+        for alert in data:
+            alert["id"] = str(alert.get("id"))
+        return data
+    except Exception as e:
+        print(f"[Supabase Error] get_alerts failed: {e}")
+        return []
+
+def create_db_alert(batch_id, device_id, prediction_id, title, description, severity):
+    if not supabase:
+        new_id = len(_mock_alerts) + 1
+        alert = {
+            "id": str(new_id),
+            "batch_id": batch_id,
+            "device_id": device_id,
+            "prediction_id": prediction_id,
+            "title": title,
+            "description": description,
+            "severity": severity,
+            "status": "UNRESOLVED",
+            "created_at": "now()"
+        }
+        _mock_alerts.append(alert)
+        return alert
+    try:
+        data = {
+            "batch_id": batch_id,
+            "device_id": device_id,
+            "prediction_id": prediction_id,
+            "title": title,
+            "description": description,
+            "severity": severity,
+            "status": "UNRESOLVED"
+        }
+        res = supabase.table("alerts").insert(data).execute()
+        if res.data and len(res.data) > 0:
+            alert = dict(res.data[0])
+            alert["id"] = str(alert.get("id"))
+            return alert
+        return None
+    except Exception as e:
+        print(f"[Supabase Error] create_db_alert failed: {e}")
+        return None
+
+def update_alert_status(alert_id, status):
+    if not supabase:
+        for alert in _mock_alerts:
+            if alert.get("id") == str(alert_id):
+                alert["status"] = status
+                return True
+        return False
+    try:
+        res = supabase.table("alerts").update({"status": status}).eq("id", int(alert_id)).execute()
+        return True
+    except Exception as e:
+        print(f"[Supabase Error] update_alert_status failed: {e}")
+        return False
+
+def get_cases(vet_id=None, batch_id=None):
+    if not supabase:
+        cases = list(_mock_cases)
+        if vet_id:
+            cases = [c for c in cases if c.get("veterinarian_id") == vet_id]
+        if batch_id:
+            cases = [c for c in cases if c.get("batch_id") == batch_id]
+        return cases
+    try:
+        query = supabase.table("veterinary_cases").select("*")
+        if vet_id:
+            query = query.eq("veterinarian_id", vet_id)
+        if batch_id:
+            query = query.eq("batch_id", batch_id)
+        res = query.order("created_at", desc=True).execute()
+        data = res.data or []
+        for case in data:
+            case["id"] = str(case.get("id"))
+            if case.get("alert_id") is not None:
+                case["alert_id"] = str(case.get("alert_id"))
+        return data
+    except Exception as e:
+        print(f"[Supabase Error] get_cases failed: {e}")
+        return []
+
+def create_case(alert_id, batch_id, veterinarian_id, status):
+    new_id = str(uuid.uuid4())
+    case = {
+        "id": new_id,
+        "alert_id": str(alert_id) if alert_id else None,
+        "batch_id": batch_id,
+        "veterinarian_id": veterinarian_id,
+        "status": status,
+        "diagnosis": None,
+        "recommendation": None,
+        "treatment": None,
+        "follow_up_instructions": None,
+        "created_at": "now()",
+        "updated_at": "now()"
+    }
+    if not supabase:
+        _mock_cases.append(case)
+        return case
+    try:
+        data = {
+            "batch_id": batch_id,
+            "status": status
+        }
+        if alert_id is not None:
+            data["alert_id"] = int(alert_id)
+        if veterinarian_id is not None:
+            data["veterinarian_id"] = veterinarian_id
+        res = supabase.table("veterinary_cases").insert(data).execute()
+        if res.data and len(res.data) > 0:
+            result = dict(res.data[0])
+            result["id"] = str(result.get("id"))
+            if result.get("alert_id") is not None:
+                result["alert_id"] = str(result.get("alert_id"))
+            return result
+        # Supabase returned no data — fall back to mock
+        print("[Supabase] create_case: insert returned no data, falling back to mock storage")
+        _mock_cases.append(case)
+        return case
+    except Exception as e:
+        print(f"[Supabase Error] create_case failed: {e}")
+        print("[Supabase] Falling back to mock storage for this case")
+        _mock_cases.append(case)
+        return case
+
+def update_case(case_id, veterinarian_id, status, diagnosis, recommendation, treatment, follow_up_instructions):
+    # Try mock storage first (works for both offline and fallback cases)
+    for case in _mock_cases:
+        if case.get("id") == str(case_id):
+            case["veterinarian_id"] = veterinarian_id
+            case["status"] = status
+            case["diagnosis"] = diagnosis
+            case["recommendation"] = recommendation
+            case["treatment"] = treatment
+            case["follow_up_instructions"] = follow_up_instructions
+            case["updated_at"] = "now()"
+            return True
+    if not supabase:
+        return False
+    try:
+        data = {
+            "status": status,
+            "diagnosis": diagnosis,
+            "recommendation": recommendation,
+            "treatment": treatment,
+            "follow_up_instructions": follow_up_instructions,
+            "updated_at": "now()"
+        }
+        if veterinarian_id is not None:
+            data["veterinarian_id"] = veterinarian_id
+        res = supabase.table("veterinary_cases").update(data).eq("id", str(case_id)).execute()
+        return True
+    except Exception as e:
+        print(f"[Supabase Error] update_case failed: {e}")
+        return False
+

@@ -41,10 +41,11 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun checkCurrentUser() {
         viewModelScope.launch {
             _uiState.value = AuthUiState.Loading
-            val currentUser = repository.getCurrentUser()
+            var currentUser = repository.getCurrentUser()
             if (currentUser != null) {
                 try {
                     repository.fetchUserContext(currentUser.uid)
+                    currentUser = repository.getCurrentUser() ?: currentUser
                 } catch (e: Exception) {
                     // Ignore errors during offline startup checks
                 }
@@ -75,7 +76,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         } catch (e: Exception) {
                             // Ignore errors during login context fetch
                         }
-                        _uiState.value = AuthUiState.Authenticated(userProfile)
+                        val updatedUser = repository.getCurrentUser() ?: userProfile
+                        _uiState.value = AuthUiState.Authenticated(updatedUser)
                     }
                 },
                 onFailure = { error ->

@@ -69,29 +69,29 @@ data class BatchListApiResponse(
 )
 
 interface BatchApi {
-    @POST("api/v1/farms/{farm_id}/batches")
+    @POST("farms/{farm_id}/batches")
     suspend fun startBatch(
         @Path("farm_id") farmId: String,
         @Body body: StartBatchRequest
     ): BatchApiResponse
 
-    @GET("api/v1/farms/{farm_id}/batches/active")
+    @GET("farms/{farm_id}/batches/active")
     suspend fun getActiveBatch(
         @Path("farm_id") farmId: String
     ): BatchApiResponse
 
-    @PUT("api/v1/batches/{batch_id}/status")
+    @PUT("batches/{batch_id}/status")
     suspend fun closeBatch(
         @Path("batch_id") batchId: String,
         @Body body: CloseBatchRequest
     ): BatchApiResponse
 
-    @GET("api/v1/farms/{farm_id}/batches")
+    @GET("farms/{farm_id}/batches")
     suspend fun getAllBatches(
         @Path("farm_id") farmId: String
     ): BatchListApiResponse
 
-    @POST("api/v1/batches/{batch_id}/mortality")
+    @POST("batches/{batch_id}/mortality")
     suspend fun recordMortality(
         @Path("batch_id") batchId: String,
         @Body body: RecordMortalityRequest

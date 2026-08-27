@@ -13,7 +13,7 @@ from ml.preprocessing import (
 
 prediction_bp = Blueprint("prediction_bp", __name__)
 
-@prediction_bp.route('/api/v1/predictions/latest', methods=['GET'])
+@prediction_bp.route('/predictions/latest', methods=['GET'])
 def get_latest_prediction_endpoint():
     try:
         device_id = request.args.get('deviceId')
@@ -41,7 +41,7 @@ def get_latest_prediction_endpoint():
         print(f"[Prediction API] Error in get_latest_prediction_endpoint: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@prediction_bp.route('/api/v1/predict-disease', methods=['POST'])
+@prediction_bp.route('/predict-disease', methods=['POST'])
 def predict_disease_endpoint():
     try:
         data = request.get_json() or {}
@@ -322,7 +322,7 @@ def predict_disease_endpoint():
         print(f"[Prediction API] Disease prediction error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@prediction_bp.route('/api/v1/predict-sound', methods=['POST'])
+@prediction_bp.route('/predict-sound', methods=['POST'])
 def predict_sound_endpoint():
     try:
         if 'file' not in request.files:
@@ -397,7 +397,7 @@ def upload_media_bytes(file_bytes, bucket_name, folder, file_name):
         return None
 
 
-@prediction_bp.route('/api/v1/guardian/predict', methods=['POST'])
+@prediction_bp.route('/guardian/predict', methods=['POST'])
 def guardian_predict_endpoint():
     try:
         import time

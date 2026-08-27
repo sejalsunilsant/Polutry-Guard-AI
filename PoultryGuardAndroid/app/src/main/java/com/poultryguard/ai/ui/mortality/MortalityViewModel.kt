@@ -100,6 +100,14 @@ class MortalityViewModel(application: Application) : AndroidViewModel(applicatio
 
             result.fold(
                 onSuccess = {
+                    viewModelScope.launch {
+                        try {
+                            val caseRepository = com.poultryguard.ai.data.repository.VeterinaryCaseRepository(getApplication())
+                            caseRepository.checkAndTriggerAutoVetAlert(activeBatch.id)
+                        } catch (e: Exception) {
+                            // ignore auto alert check errors
+                        }
+                    }
                     _isSubmitting.value = false
                     _submissionSuccess.value = true
                 },

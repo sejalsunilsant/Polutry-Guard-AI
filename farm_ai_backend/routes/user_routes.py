@@ -9,7 +9,7 @@ from data.supabase_client import (
 
 user_bp = Blueprint("user_bp", __name__)
 
-@user_bp.route('/api/v1/users/sync', methods=['POST'])
+@user_bp.route('/users/sync', methods=['POST'])
 def sync_user():
     try:
         data = request.get_json() or {}
@@ -68,7 +68,7 @@ def sync_user():
         return jsonify({'error': f"Internal server error: {str(e)}"}), 500
  
  
-@user_bp.route('/api/v1/auth/register', methods=['POST'])
+@user_bp.route('/auth/register', methods=['POST'])
 def auth_register():
     try:
         data = request.get_json() or {}
@@ -130,7 +130,7 @@ def auth_register():
         return jsonify({'status': 'error', 'message': f"Internal server error: {str(e)}"}), 500
 
 
-@user_bp.route('/api/v1/auth/login', methods=['POST'])
+@user_bp.route('/auth/login', methods=['POST'])
 def auth_login():
     try:
         data = request.get_json() or {}
@@ -155,7 +155,7 @@ def auth_login():
         return jsonify({'status': 'error', 'message': f"Internal server error: {str(e)}"}), 500
 
 
-@user_bp.route('/api/v1/auth/forgot-password', methods=['POST'])
+@user_bp.route('/auth/forgot-password', methods=['POST'])
 def auth_forgot_password():
     try:
         data = request.get_json() or {}
@@ -175,7 +175,7 @@ def auth_forgot_password():
         return jsonify({'status': 'error', 'message': f"Internal server error: {str(e)}"}), 500
 
 
-@user_bp.route('/api/v1/admin/pending-farmers', methods=['GET'])
+@user_bp.route('/admin/pending-farmers', methods=['GET'])
 def get_pending_farmers_route():
     try:
         from data.supabase_client import get_pending_farmers
@@ -189,7 +189,7 @@ def get_pending_farmers_route():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@user_bp.route('/api/v1/admin/review-farmer', methods=['POST'])
+@user_bp.route('/admin/review-farmer', methods=['POST'])
 def review_farmer_route():
     try:
         data = request.get_json() or {}
@@ -212,7 +212,7 @@ def review_farmer_route():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@user_bp.route('/api/v1/admin/farmers', methods=['GET'])
+@user_bp.route('/admin/farmers', methods=['GET'])
 def get_all_farmers_route():
     try:
         from data.supabase_client import get_all_farmers
@@ -226,7 +226,7 @@ def get_all_farmers_route():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@user_bp.route('/api/v1/veterinarians', methods=['GET'])
+@user_bp.route('/veterinarians', methods=['GET'])
 def get_all_veterinarians_route():
     try:
         from data.supabase_client import get_all_veterinarians
@@ -240,7 +240,7 @@ def get_all_veterinarians_route():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-@user_bp.route('/api/v1/users/<profile_id>/context', methods=['GET'])
+@user_bp.route('/users/<profile_id>/context', methods=['GET'])
 def get_user_context(profile_id):
     try:
         from data.supabase_client import supabase
@@ -381,4 +381,101 @@ def get_user_context(profile_id):
     except Exception as e:
         print(f"[Auth API] Error in get_user_context: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# API endpoints for alerts and cases
+@user_bp.route("/health-alerts", methods=["GET"])
+@user_bp.route("/alerts", methods=["GET"])
+def api_get_alerts():
+    batch_id = request.args.get("batch_id")
+    from data.supabase_client import get_alerts
+    data = get_alerts(batch_id)
+    return jsonify({"status": "success", "data": data}), 200
+
+@user_bp.route("/health-alerts", methods=["POST"])
+@user_bp.route("/alerts", methods=["POST"])
+def api_create_alert():
+    try:
+        req = request.json
+        batch_id = req.get("batchId")
+        device_id = req.get("deviceId")
+        prediction_id = req.get("predictionId")
+        title = req.get("title")
+        description = req.get("description")
+        severity = req.get("severity")
+        from data.supabase_client import create_db_alert
+        alert = create_db_alert(batch_id, device_id, prediction_id, title, description, severity)
+        if alert:
+            return jsonify({"status": "success", "data": alert}), 200
+        return jsonify({"status": "error", "message": "Failed to create alert"}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@user_bp.route("/health-alerts/<alert_id>", methods=["PUT"])
+@user_bp.route("/alerts/<alert_id>", methods=["PUT"])
+def api_update_alert_status(alert_id):
+    try:
+        req = request.json
+        status = req.get("status")
+        from data.supabase_client import update_alert_status
+        success = update_alert_status(alert_id, status)
+        if success:
+            return jsonify({"status": "success", "message": "Alert status updated"}), 200
+        return jsonify({"status": "error", "message": "Failed to update alert"}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@user_bp.route("/veterinary-consultations", methods=["GET"])
+@user_bp.route("/cases", methods=["GET"])
+def api_get_cases():
+    vet_id = request.args.get("vet_id")
+    batch_id = request.args.get("batch_id")
+    from data.supabase_client import get_cases
+    data = get_cases(vet_id, batch_id)
+    return jsonify({"status": "success", "data": data}), 200
+
+@user_bp.route("/veterinary-consultations", methods=["POST"])
+@user_bp.route("/cases", methods=["POST"])
+def api_create_case():
+    try:
+        req = request.json
+        alert_id = req.get("alertId")
+        batch_id = req.get("batchId")
+        veterinarian_id = req.get("veterinarianId")
+        status = req.get("status")
+        from data.supabase_client import create_case
+        case = create_case(alert_id, batch_id, veterinarian_id, status)
+        if case:
+            return jsonify({"status": "success", "data": case}), 200
+        return jsonify({"status": "error", "message": "Failed to create case"}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@user_bp.route("/veterinary-consultations/<case_id>", methods=["PUT"])
+@user_bp.route("/cases/<case_id>", methods=["PUT"])
+def api_update_case(case_id):
+    try:
+        req = request.json
+        veterinarian_id = req.get("veterinarianId")
+        status = req.get("status")
+        diagnosis = req.get("diagnosis")
+        recommendation = req.get("recommendation")
+        treatment = req.get("treatment")
+        follow_up_instructions = req.get("followUpInstructions")
+        from data.supabase_client import update_case
+        success = update_case(
+            case_id=case_id,
+            veterinarian_id=veterinarian_id,
+            status=status,
+            diagnosis=diagnosis,
+            recommendation=recommendation,
+            treatment=treatment,
+            follow_up_instructions=follow_up_instructions
+        )
+        if success:
+            return jsonify({"status": "success", "message": "Case updated successfully"}), 200
+        return jsonify({"status": "error", "message": "Failed to update case"}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
