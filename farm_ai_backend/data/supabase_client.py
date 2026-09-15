@@ -1798,29 +1798,58 @@ def get_all_kits():
         return []
     try:
         # Fetch pre-registered kits (not yet assigned to a farm)
-        kit_res = supabase.table("device_kits").select("id, status, registered_at").execute()
+        kit_res = supabase.table("device_kits").select(
+            "id, status, registered_at, name, kit_id, serial_number, firmware_version, thingspeak_channel_id, thingspeak_read_api_key"
+        ).execute()
         kits_raw = kit_res.data or []
 
         # Fetch provisioned devices (assigned to a farm)
         dev_res = supabase.table("devices").select(
-            "id, name, farm_id, thingspeak_channel_id, last_seen_at, created_at"
+            "id, name, farm_id, thingspeak_channel_id, thingspeak_read_api_key, created_at"
         ).execute()
         devices_raw = dev_res.data or []
         devices_by_id = {d["id"]: d for d in devices_raw}
+
+        # Resolve farm and farmer names
+        farms_res = supabase.table("farms").select("id, name, farm_members(profiles(id, name))").execute()
+        farm_info = {}
+        if farms_res.data:
+            for f in farms_res.data:
+                fid = f.get("id")
+                fname = f.get("name") or ""
+                members = f.get("farm_members") or []
+                farmer_id = ""
+                farmer_name = ""
+                if members and len(members) > 0:
+                    profile = members[0].get("profiles") or {}
+                    farmer_id = profile.get("id") or ""
+                    farmer_name = profile.get("name") or ""
+                farm_info[fid] = {
+                    "farm_name": fname,
+                    "farmer_id": farmer_id,
+                    "farmer_name": farmer_name
+                }
 
         # Merge: device_kits entries enriched with devices data where available
         result = []
         seen = set()
         for kit in kits_raw:
             dev = devices_by_id.get(kit["id"], {})
+            finfo = farm_info.get(dev.get("farm_id"), {})
             merged = {
                 "id": kit["id"],
-                "name": dev.get("name") or kit.get("id"),
+                "name": kit.get("name") or dev.get("name") or kit.get("id"),
+                "kit_id": kit.get("kit_id") or kit.get("id"),
+                "serial_number": kit.get("serial_number") or "",
+                "firmware_version": kit.get("firmware_version") or "",
                 "farm_id": dev.get("farm_id"),
-                "thingspeak_channel_id": dev.get("thingspeak_channel_id"),
-                "last_seen_at": dev.get("last_seen_at"),
+                "farm_name": finfo.get("farm_name", ""),
+                "farmer_id": finfo.get("farmer_id", ""),
+                "farmer_name": finfo.get("farmer_name", ""),
+                "thingspeak_channel_id": dev.get("thingspeak_channel_id") or kit.get("thingspeak_channel_id"),
+                "thingspeak_read_api_key": dev.get("thingspeak_read_api_key") or kit.get("thingspeak_read_api_key"),
                 "created_at": dev.get("created_at") or kit.get("registered_at"),
-                "lifecycle_status": kit.get("status", "Available"),
+                "lifecycle_status": kit.get("status") or ("Active" if dev.get("farm_id") else "Available"),
             }
             result.append(merged)
             seen.add(kit["id"])
@@ -1828,12 +1857,19 @@ def get_all_kits():
         # Also include devices that were provisioned without going through device_kits
         for dev in devices_raw:
             if dev["id"] not in seen:
+                finfo = farm_info.get(dev.get("farm_id"), {})
                 result.append({
                     "id": dev["id"],
-                    "name": dev.get("name"),
+                    "name": dev.get("name") or dev["id"],
+                    "kit_id": dev["id"],
+                    "serial_number": "",
+                    "firmware_version": "",
                     "farm_id": dev.get("farm_id"),
+                    "farm_name": finfo.get("farm_name", ""),
+                    "farmer_id": finfo.get("farmer_id", ""),
+                    "farmer_name": finfo.get("farmer_name", ""),
                     "thingspeak_channel_id": dev.get("thingspeak_channel_id"),
-                    "last_seen_at": dev.get("last_seen_at"),
+                    "thingspeak_read_api_key": dev.get("thingspeak_read_api_key"),
                     "created_at": dev.get("created_at"),
                     "lifecycle_status": "Active" if dev.get("farm_id") else "Available",
                 })

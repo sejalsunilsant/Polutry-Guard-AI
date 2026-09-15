@@ -236,14 +236,16 @@ def predict_disease_endpoint():
         # 8. Dynamic Recommendations
         if ammonia >= 25.0:
             recommendation = f"CRITICAL AMMONIA ALERT: Air quality is hazardous ({ammonia} ppm). Exhaust fans must run at 100% capacity."
+        elif fused_disease == "Infectious Coryza":
+            recommendation = f"INFECTIOUS CORYZA ALERT: Elevated risk of acute respiratory infection ({int(confidence * 100)}% confidence). Consult vet for antimicrobial therapy, isolate birds with facial swelling, and sanitize water lines."
+        elif fused_disease == "Fowlpox":
+            recommendation = f"FOWLPOX ALERT: High risk of viral Fowlpox ({int(confidence * 100)}% confidence). Isolate symptomatic birds, control mosquito vectors, and apply topical antiseptics to lesions."
         elif fused_disease == "Newcastle":
             recommendation = f"NEWCASTLE WARNING: High risk of Newcastle ({int(confidence * 100)}% confidence). Ensure quarantine and inspect flock."
         elif fused_disease == "Avian Influenza":
             recommendation = f"AVIAN INFLUENZA WARNING: High risk of Avian Influenza ({int(confidence * 100)}% confidence). Check for visual lethargy."
         elif fused_disease == "Coccidiosis":
             recommendation = f"COCCIDIOSIS DETECTED: Risk of digestive infection ({int(confidence * 100)}% confidence). Keep litter dry."
-        elif fused_disease == "Fowlpox":
-            recommendation = f"FOWLPOX ALERT: Risk of Fowlpox ({int(confidence * 100)}% confidence). Check comb/wattle lesions."
         elif fused_disease == "Infectious Bronchitis":
             recommendation = f"INFECTIOUS BRONCHITIS ALERT: Risk of IB respiratory infection ({int(confidence * 100)}% confidence). Gasping vocalizations possible."
         else:
@@ -542,14 +544,16 @@ def guardian_predict_endpoint():
         # Generate biosecurity recommendations
         if ammonia >= 25.0:
             recommendation = f"CRITICAL AMMONIA ALERT: Air quality is hazardous ({ammonia} ppm). Exhaust ventilation fans must run at 100% capacity to flush the house and prevent permanent respiratory tract burns."
+        elif fused_disease == "Infectious Coryza":
+            recommendation = f"INFECTIOUS CORYZA ALERT: Elevated risk of acute respiratory bacterial infection ({int(confidence * 100)}% confidence). Acoustic gasping/rales and facial swelling detected. Consult flock veterinarian for antimicrobial therapy, separate symptomatic birds, and sanitize water lines."
+        elif fused_disease == "Fowlpox":
+            recommendation = f"FOWLPOX ALERT: High risk of Fowlpox infection ({int(confidence * 100)}% confidence). Visual check reveals possible comb/wattle lesions. Isolate symptomatic birds, control mosquitos, and apply antiseptic."
         elif fused_disease == "Newcastle":
             recommendation = f"NEWCASTLE DISEASE WARNING: High risk of Newcastle infection ({int(confidence * 100)}% confidence). Acoustic/visual metrics show gasping and abnormal posture. Quarantine affected birds and contact your vet immediately."
         elif fused_disease == "Avian Influenza":
             recommendation = f"AVIAN INFLUENZA WARNING: High risk of Avian Influenza ({int(confidence * 100)}% confidence). Visual monitors show extreme lethargy and abnormal appearance. Alert biosecurity officers and isolate the flock."
         elif fused_disease == "Coccidiosis":
             recommendation = f"COCCIDIOSIS DETECTED: Elevated risk of digestive infection ({int(confidence * 100)}% confidence). Visual cues show huddling/lying. Ensure composted litter is dry, feed is dry, and treat with coccidiostats."
-        elif fused_disease == "Fowlpox":
-            recommendation = f"FOWLPOX ALERT: High risk of Fowlpox infection ({int(confidence * 100)}% confidence). Visual check reveals possible comb/wattle lesions. Isolate symptomatic birds, control mosquitos, and apply antiseptic."
         elif fused_disease == "Infectious Bronchitis":
             recommendation = f"INFECTIOUS BRONCHITIS ALERT: High risk of IB respiratory infection ({int(confidence * 100)}% confidence). Detected heavy coughing/gasping. Stabilize shed temperature and mist disinfectant to suppress aerosol transmission."
         else:
@@ -618,7 +622,7 @@ def guardian_predict_endpoint():
                 severity=risk_level
             )
 
-        timestamp_str = datetime.datetime.utcnow().isoformat() + "Z"
+        timestamp_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
         
         return jsonify({
             "status": "success",

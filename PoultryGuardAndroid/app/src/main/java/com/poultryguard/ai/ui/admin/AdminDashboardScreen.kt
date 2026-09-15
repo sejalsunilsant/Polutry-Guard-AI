@@ -89,8 +89,13 @@ fun AdminDashboardScreen(
 
     val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(context) }
     val vetsListState by vetRepository.getVeterinariansFlow().collectAsState(initial = emptyList())
+    val cacheManager = remember { LocalCacheManager(context) }
 
-    LaunchedEffect(farmersListState, vetsListState) {
+    var kitsList by remember {
+        mutableStateOf(cacheManager.getHardwareKits())
+    }
+
+    LaunchedEffect(farmersListState, vetsListState, kitsList) {
         val current = statsDao.getSystemStats().firstOrNull() ?: com.poultryguard.ai.data.model.SystemStats()
         statsDao.insertOrUpdate(current.copy(
             totalFarmers = farmersListState.size,
@@ -98,7 +103,10 @@ fun AdminDashboardScreen(
             registeredVets = vetsListState.size,
             activeVets = vetsListState.count { it.verificationStatus == "VERIFIED" },
             totalFarms = farmersListState.map { it.farmName }.distinct().count { it.isNotBlank() },
-            activeFarms = farmersListState.filter { it.isOnline }.map { it.farmName }.distinct().count { it.isNotBlank() }
+            activeFarms = farmersListState.filter { it.isOnline }.map { it.farmName }.distinct().count { it.isNotBlank() },
+            totalDevices = kitsList.size,
+            onlineDevices = kitsList.count { it.isActive || it.lifecycleStatus == "Active" },
+            offlineDevices = kitsList.count { !it.isActive && it.lifecycleStatus != "Active" }
         ))
     }
 
@@ -107,6 +115,10 @@ fun AdminDashboardScreen(
     LaunchedEffect(Unit) {
         authRepository.syncAllFarmers()
         vetRepository.syncVeterinarians()
+        val kitsRes = authRepository.syncAllKits()
+        if (kitsRes.isSuccess) {
+            kitsList = kitsRes.getOrDefault(emptyList())
+        }
     }
     var showAddVetDialog by remember { mutableStateOf(false) }
 
@@ -166,18 +178,16 @@ fun AdminDashboardScreen(
         }
     }
 
-    val cacheManager = remember { LocalCacheManager(context) }
-
-    // Seed mock data for demonstration if empty
-    var kitsList by remember {
-        mutableStateOf(cacheManager.getHardwareKits())
-    }
-
     var selectedTab by remember { mutableStateOf(0) }
 
     LaunchedEffect(selectedTab) {
-        if (selectedTab == 5) {
+        if (selectedTab == 4) {
             authRepository.syncAllFarmers()
+        } else if (selectedTab == 2) {
+            val kitsRes = authRepository.syncAllKits()
+            if (kitsRes.isSuccess) {
+                kitsList = kitsRes.getOrDefault(emptyList())
+            }
         }
     }
 
@@ -198,7 +208,7 @@ fun AdminDashboardScreen(
         modifier = modifier.fillMaxSize(),
         containerColor = AppBackground,
         floatingActionButton = {
-            if (selectedTab == 3) {
+            if (selectedTab == 2) {
                 FloatingActionButton(
                     onClick = { showAddKitDialog = true },
                     containerColor = GreenPrimary,
@@ -247,24 +257,18 @@ fun AdminDashboardScreen(
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.HeartBroken, contentDescription = "Health") },
-                    label = { Text("Health") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.Router, contentDescription = "Kits") },
                     label = { Text("Kits") }
                 )
                 NavigationBarItem(
-                    selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.Feedback, contentDescription = "Support") },
                     label = { Text("Support") }
                 )
                 NavigationBarItem(
-                    selected = selectedTab == 5,
-                    onClick = { selectedTab = 5 },
+                    selected = selectedTab == 4,
+                    onClick = { selectedTab = 4 },
                     icon = { Icon(Icons.Default.Map, contentDescription = "Map") },
                     label = { Text("Map") }
                 )
@@ -300,11 +304,6 @@ fun AdminDashboardScreen(
                                 .background(AlertOrange)
                         )
                     }
-                    Text(
-                        text = "Superintendent Console",
-                        style = Typography.headlineMedium,
-                        fontWeight = FontWeight.Bold
-                    )
                 }
 
                 // Logout Button
@@ -1083,91 +1082,6 @@ fun AdminDashboardScreen(
                     }
                 }
                 2 -> {
-                    // IoT Node Health and approvals list
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp)
-                    ) {
-                        // System KPI Cards
-                        item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Card(
-                                    modifier = Modifier.weight(1.5f),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = CardSurface)
-                                ) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Text(text = "IoT Gateways Status", style = Typography.labelMedium, color = TextMedium)
-                                        Text(
-                                            text = "6 / 6 Active",
-                                            style = Typography.headlineMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = TextDark
-                                        )
-                                        Text(text = "All systems reporting OK", style = Typography.labelMedium, color = GreenPrimary, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-
-                                Card(
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = CardSurface)
-                                ) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Text(text = "Server Sync Latency", style = Typography.labelMedium, color = TextMedium)
-                                        Text(
-                                            text = "24 ms",
-                                            style = Typography.headlineMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = TextDark
-                                        )
-                                        Text(text = "Reporting Normal", style = Typography.labelMedium, color = GreenPrimary, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-                        }
-
-                        // Pending Approvals Widget
-                        item {
-                            Text(
-                                text = "Pending Staff Registrations",
-                                style = Typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = TextDark
-                            )
-                        }
-
-                        item {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = CardSurface)
-                            ) {
-                                Column(modifier = Modifier.padding(16.dp)) {
-                                    StaffApprovalRow(
-                                        name = "Alex Mercer",
-                                        requestRole = "Farmer Assistant",
-                                        email = "alex.m@farmsecure.net"
-                                    )
-                                    Divider(color = DividerColor, thickness = 1.dp, modifier = Modifier.padding(vertical = 12.dp))
-                                    StaffApprovalRow(
-                                        name = "Dr. Linda Croft",
-                                        requestRole = "Consulting Veterinarian",
-                                        email = "linda.c@poultryhealth.org"
-                                    )
-                                }
-                            }
-                        }
-
-                    }
-                }
-                3 -> {
                     // Device Kit Management screen
                     Column(
                         modifier = Modifier
@@ -1319,7 +1233,7 @@ fun AdminDashboardScreen(
                         }
                     }
                 }
-                4 -> {
+                3 -> {
                     // Support & Complaints tab
                     Column(
                         modifier = Modifier
@@ -1488,7 +1402,7 @@ fun AdminDashboardScreen(
                         }
                     }
                 }
-                5 -> {
+                4 -> {
                     AdminMapView(farmers = farmersListState)
                 }
             }
@@ -2569,60 +2483,6 @@ fun getStatusColor(status: String): Color {
         "Maintenance" -> Color(0xFFFFAB00)
         "Retired" -> AlertRed
         else -> TextMedium
-    }
-}
-
-@Composable
-fun StaffApprovalRow(
-    name: String,
-    requestRole: String,
-    email: String
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = name,
-                style = Typography.bodyLarge,
-                fontWeight = FontWeight.Bold,
-                color = TextDark
-            )
-            Text(
-                text = "$requestRole • $email",
-                style = Typography.labelMedium,
-                color = TextMedium
-            )
-        }
-        
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Button(
-                onClick = { /* Approve action */ },
-                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                modifier = Modifier.height(32.dp)
-            ) {
-                Text("Approve", fontSize = 11.sp, color = Color.White)
-            }
-            OutlinedButton(
-                onClick = { /* Deny action */ },
-                border = BorderStroke(1.dp, AlertRed),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = AlertRed),
-                shape = RoundedCornerShape(8.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                modifier = Modifier.height(32.dp)
-            ) {
-                Text("Deny", fontSize = 11.sp)
-            }
-        }
     }
 }
 

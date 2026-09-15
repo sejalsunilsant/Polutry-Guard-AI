@@ -174,9 +174,16 @@ data class KitDto(
     @SerializedName("name") val name: String?,
     @SerializedName("kit_id") val kitId: String?,
     @SerializedName("farm_id") val farmId: String?,
+    @SerializedName("farm_name") val farmName: String? = null,
+    @SerializedName("farmer_id") val farmerId: String? = null,
+    @SerializedName("farmer_name") val farmerName: String? = null,
+    @SerializedName("serial_number") val serialNumber: String? = null,
+    @SerializedName("firmware_version") val firmwareVersion: String? = null,
+    @SerializedName("lifecycle_status") val lifecycleStatus: String? = null,
     @SerializedName("thingspeak_channel_id") val thingspeakChannelId: String?,
-    @SerializedName("last_seen_at") val lastSeenAt: String?,
-    @SerializedName("created_at") val createdAt: String?
+    @SerializedName("thingspeak_read_api_key") val thingspeakReadApiKey: String? = null,
+    @SerializedName("last_seen_at") val lastSeenAt: String? = null,
+    @SerializedName("created_at") val createdAt: String? = null
 )
 
 /** Generic single-kit response envelope. */

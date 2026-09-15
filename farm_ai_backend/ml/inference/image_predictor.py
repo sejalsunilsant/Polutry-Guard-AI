@@ -1,207 +1,105 @@
+from __future__ import annotations
+
 import os
+from typing import Any, BinaryIO, Dict, Optional, Union
 import numpy as np
+from PIL import Image
+
+from Apurva_Model.image_predictor import (
+    CANONICAL_CNN_CLASSES,
+    load_image_model,
+    predict_image as apurva_predict_image,
+)
+
 
 class ImagePredictor:
-    _onnx_session = None
-    _tflite_interpreter = None
-    _mode = None  # "onnx", "tflite", or "fallback"
-    _classes = ["Normal", "Huddling", "Lethargic", "Crowding"]
+    _model = None
+    _idx_to_class = None
+    _device = None
+    _classes = ["Fowlpox", "Infectious Coryza", "Healthy"]
 
     @classmethod
     def load_model(cls):
         """
-        Loads the image classification model from ml/model/ once (Singleton).
-        Falls back to analysis heuristics if no model is found in the directory.
+        Loads the Apurva ResNet18 PyTorch model once (Singleton).
         """
-        if cls._mode is not None:
-            return cls._mode
+        if cls._model is not None:
+            return "pytorch"
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        onnx_path = os.path.join(base_dir, "model", "poultry_image_model.onnx")
-        tflite_path = os.path.join(base_dir, "model", "poultry_image_model.tflite")
-
-        # 1. Try ONNX loader
-        if os.path.exists(onnx_path):
-            try:
-                import onnxruntime as ort
-                print(f"[Image Predictor] Loading ONNX model from: {onnx_path}")
-                cls._onnx_session = ort.InferenceSession(onnx_path, providers=['CPUExecutionProvider'])
-                cls._mode = "onnx"
-                print("[Image Predictor] ONNX model loaded successfully.")
-                return cls._mode
-            except Exception as e:
-                print(f"[Image Predictor] ONNX loading failed: {e}")
-
-        # 2. Try TFLite loader
-        if os.path.exists(tflite_path):
-            try:
-                import sys
-                try:
-                    if sys.platform == "win32":
-                        import tensorflow.lite as tflite
-                    else:
-                        try:
-                            import tflite_runtime.interpreter as tflite
-                        except ImportError:
-                            import tensorflow.lite as tflite
-                except ImportError:
-                    raise ImportError("TFLite runtime libraries (tensorflow or tflite-runtime) not installed.")
-                print(f"[Image Predictor] Loading TFLite model from: {tflite_path}")
-                cls._tflite_interpreter = tflite.Interpreter(model_path=tflite_path)
-                cls._tflite_interpreter.allocate_tensors()
-                cls._mode = "tflite"
-                print("[Image Predictor] TFLite model loaded successfully.")
-                return cls._mode
-            except Exception as e:
-                print(f"[Image Predictor] TFLite loading failed: {e}")
-
-        # 3. Fallback Heuristics
-        print("[Image Predictor] WARNING: Image classifier running in fallback heuristics mode (No model file found).")
-        cls._mode = "fallback"
-        return cls._mode
+        try:
+            print("[Image Predictor] Loading Apurva ResNet18 PyTorch model...")
+            cls._model, cls._idx_to_class, cls._device = load_image_model()
+            cls._classes = list(CANONICAL_CNN_CLASSES)
+            print(f"[Image Predictor] Apurva ResNet18 loaded successfully on {cls._device}")
+            return "pytorch"
+        except Exception as e:
+            print(f"[Image Predictor] Error loading Apurva ResNet18 model: {e}. Fallback enabled.")
+            cls._model = None
+            return "fallback"
 
     @classmethod
-    def predict(cls, image_array, confidence_threshold=0.5):
+    def predict(
+        cls,
+        image_input: Union[str, BinaryIO, bytes, Image.Image, np.ndarray],
+        confidence_threshold: float = 0.5,
+    ) -> Dict[str, Any]:
         """
-        Predict behavior or disease classification from preprocessed image.
-        Args:
-            image_array (np.ndarray): Normalized float array of shape (224, 224, 3)
+        Predict poultry disease from image input (array, file, bytes, PIL).
+
         Returns:
             dict: {
-                "prediction": str ("Normal" | "Huddling" | "Lethargic" | "Crowding" | "Uncertain"),
+                "prediction": str ("Healthy" | "Fowlpox" | "Infectious Coryza" | "Uncertain"),
                 "confidence": float,
                 "probabilities": dict mapping class -> float probability,
+                "symptoms": dict mapping symptom -> float probability,
                 "status": str ("success" | "fallback" | "error")
             }
         """
         cls.load_model()
 
-        if image_array is None:
+        if image_input is None:
             return {
-                "prediction": "Uncertain",
+                "prediction": "Healthy",
                 "confidence": 0.0,
-                "probabilities": {},
+                "probabilities": {"Healthy": 1.0, "Fowlpox": 0.0, "Infectious Coryza": 0.0},
+                "symptoms": {"scabby_lesions": 0.0, "facial_swelling_nasal_discharge": 0.0, "normal_posture_activity": 1.0},
                 "status": "error",
-                "message": "Input image array cannot be None"
+                "message": "Input image cannot be None",
             }
 
-        # Ensure correct shape: (224, 224, 3) and expand to batch size (1, 224, 224, 3)
-        if image_array.ndim == 3:
-            input_data = image_array[np.newaxis, ...].astype(np.float32)
-        elif image_array.ndim == 4:
-            input_data = image_array.astype(np.float32)
-        else:
+        try:
+            res = apurva_predict_image(image_input)
+            pred_class = res["predicted_class"]
+            confidence = float(res["confidence"])
+
+            if confidence < confidence_threshold:
+                pred_class = "Uncertain"
+
             return {
-                "prediction": "Uncertain",
-                "confidence": 0.0,
-                "probabilities": {},
-                "status": "error",
-                "message": f"Unsupported image array shape: {image_array.shape}"
+                "prediction": pred_class,
+                "predicted_class": res["predicted_class"],
+                "confidence": confidence,
+                "probabilities": res["probabilities"],
+                "symptoms": res.get("symptoms", {}),
+                "status": "success",
+                "model": "ResNet18 (Apurva)",
             }
+        except Exception as ex:
+            print(f"[Image Predictor] Apurva image prediction error: {ex}. Using heuristic fallback...")
 
-        if cls._mode == "onnx":
-            try:
-                input_name = cls._onnx_session.get_inputs()[0].name
-                predictions = cls._onnx_session.run(None, {input_name: input_data})[0]
-                probabilities = predictions[0]
-                return cls._format_output(probabilities, confidence_threshold, "success")
-            except Exception as e:
-                print(f"[Image Predictor] ONNX inference error: {e}")
-                return {"prediction": "Uncertain", "confidence": 0.0, "probabilities": {}, "status": "error", "message": str(e)}
-
-        elif cls._mode == "tflite":
-            try:
-                input_details = cls._tflite_interpreter.get_input_details()
-                output_details = cls._tflite_interpreter.get_output_details()
-
-                cls._tflite_interpreter.set_tensor(input_details[0]['index'], input_data)
-                cls._tflite_interpreter.invoke()
-                probabilities = cls._tflite_interpreter.get_tensor(output_details[0]['index'])[0]
-                return cls._format_output(probabilities, confidence_threshold, "success")
-            except Exception as e:
-                print(f"[Image Predictor] TFLite inference error: {e}")
-                return {"prediction": "Uncertain", "confidence": 0.0, "probabilities": {}, "status": "error", "message": str(e)}
-
-        else:
-            # Fallback Image Heuristic Analysis
-            # 1. Check for dark/offline frames (e.g. camera covered or night time)
-            mean_intensity = float(np.mean(image_array))
-            std_dev = float(np.std(image_array))
-            
-            probabilities = {c: 0.05 for c in cls._classes}
-            
-            if mean_intensity < 0.1:
-                # Dark/unusable image
-                probabilities = {
-                    "Normal": 0.05,
-                    "Huddling": 0.05,
-                    "Lethargic": 0.05,
-                    "Crowding": 0.85
-                }
-            elif std_dev < 0.08:
-                # Very low contrast/variance (mostly uniform color/chickens blocking camera)
-                probabilities = {
-                    "Crowding": 0.70,
-                    "Normal": 0.10,
-                    "Huddling": 0.10,
-                    "Lethargic": 0.10
-                }
-            else:
-                # Analyze color distribution (R vs G vs B mean values)
-                r_mean = float(np.mean(image_array[..., 0]))
-                g_mean = float(np.mean(image_array[..., 1]))
-                b_mean = float(np.mean(image_array[..., 2]))
-                
-                # Heuristic: normal environment has high green/blue values (composting/litters)
-                # cold stress/huddling might show high grouping colors (high red combs clumping or gray backgrounds)
-                if r_mean > g_mean and r_mean > b_mean:
-                    probabilities["Normal"] = 0.65
-                    probabilities["Lethargic"] = 0.20
-                    probabilities["Huddling"] = 0.10
-                    probabilities["Crowding"] = 0.05
-                elif b_mean > r_mean:
-                    probabilities["Huddling"] = 0.60
-                    probabilities["Lethargic"] = 0.25
-                    probabilities["Normal"] = 0.10
-                    probabilities["Crowding"] = 0.05
-                else:
-                    probabilities["Lethargic"] = 0.55
-                    probabilities["Normal"] = 0.25
-                    probabilities["Huddling"] = 0.15
-                    probabilities["Crowding"] = 0.05
-
-            pred_class = max(probabilities, key=probabilities.get)
-            confidence = probabilities[pred_class]
-            
-            probs_list = [probabilities[c] for c in cls._classes]
-            return cls._format_output(probs_list, confidence_threshold, "fallback")
-
-    @classmethod
-    def _format_output(cls, probabilities, confidence_threshold, status):
-        pred_idx = int(np.argmax(probabilities))
-        confidence = float(probabilities[pred_idx])
-        prediction = cls._classes[pred_idx]
-
-        if confidence < confidence_threshold:
-            prediction = "Uncertain"
-
-        probs_dict = {cls._classes[i]: float(probabilities[i]) for i in range(len(cls._classes))}
-        
-        # Map visual classes to specific visual symptoms
-        symptoms = {
-            "lethargy": probs_dict.get("Lethargic", 0.0),
-            "sitting_lying": probs_dict.get("Huddling", 0.0),
-            "abnormal_posture": probs_dict.get("Huddling", 0.0) * 0.7 + probs_dict.get("Lethargic", 0.0) * 0.3,
-            "reduced_activity": probs_dict.get("Lethargic", 0.0),
-            "abnormal_appearance": probs_dict.get("Lethargic", 0.0) * 0.5 + probs_dict.get("Huddling", 0.0) * 0.5,
-            "scabby_lesions": probs_dict.get("Lethargic", 0.0) * 0.3,  # proxy for lesion probability if lethargic
-            "normal_posture_activity": probs_dict.get("Normal", 0.0)
-        }
-
+        # Fallback heuristic mode
+        probs = {"Healthy": 0.70, "Fowlpox": 0.15, "Infectious Coryza": 0.15}
+        pred_class = max(probs, key=probs.get)
         return {
-            "prediction": prediction,
-            "confidence": confidence,
-            "probabilities": probs_dict,
-            "symptoms": symptoms,
-            "status": status
+            "prediction": pred_class,
+            "predicted_class": pred_class,
+            "confidence": float(probs[pred_class]),
+            "probabilities": probs,
+            "symptoms": {
+                "scabby_lesions": 0.15,
+                "facial_swelling_nasal_discharge": 0.15,
+                "normal_posture_activity": 0.70,
+            },
+            "status": "fallback",
+            "model": "Image Heuristic Fallback",
         }

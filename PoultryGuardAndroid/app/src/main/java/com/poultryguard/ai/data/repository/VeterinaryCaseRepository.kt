@@ -47,6 +47,10 @@ class VeterinaryCaseRepository(private val context: Context) {
 
     fun getAllCasesFlow(): Flow<List<VeterinaryCase>> = veterinaryCaseDao.getAllCasesFlow()
 
+    fun getAlertsForBatchFlow(batchId: String): Flow<List<Alert>> = alertDao.getAlertsForBatchFlow(batchId)
+
+    fun getCasesForBatchFlow(batchId: String): Flow<List<VeterinaryCase>> = veterinaryCaseDao.getCasesForBatchFlow(batchId)
+
     fun getCasesForVetFlow(vetId: String): Flow<List<VeterinaryCase>> =
         veterinaryCaseDao.getCasesForVetFlow(vetId)
 
@@ -262,6 +266,9 @@ class VeterinaryCaseRepository(private val context: Context) {
             val api = getApi() ?: throw Exception("API not initialized.")
             val response = api.getAlerts(batchId)
             if (response.status == "success" && response.data != null) {
+                if (batchId != null) {
+                    alertDao.deleteAlertsForBatch(batchId)
+                }
                 val list = response.data.map { dto ->
                     Alert(
                         id = dto.id,
@@ -289,6 +296,9 @@ class VeterinaryCaseRepository(private val context: Context) {
             val api = getApi() ?: throw Exception("API not initialized.")
             val response = api.getCases(vetId, batchId)
             if (response.status == "success" && response.data != null) {
+                if (batchId != null) {
+                    veterinaryCaseDao.deleteCasesForBatch(batchId)
+                }
                 val list = response.data.map { dto ->
                     VeterinaryCase(
                         id = dto.id,

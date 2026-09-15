@@ -82,12 +82,13 @@ fun VetDashboardScreen(
     val allAlerts by caseRepository.getAllAlertsFlow().collectAsState(initial = emptyList())
     val allFarmers by farmerProfileDao.getAllFarmersFlow().collectAsState(initial = emptyList())
     val allMortality by caseRepository.getAllMortalityRecordsFlow().collectAsState(initial = emptyList())
-    val allConsultations by caseRepository.getConsultationsForVetFlow(currentVet?.id ?: "vet_1").collectAsState(initial = emptyList())
+    val allConsultations by caseRepository.getConsultationsForVetFlow(currentVet?.id ?: "").collectAsState(initial = emptyList())
 
     // Tabs navigation state
     var currentTab by remember { mutableStateOf("dashboard") }
 
-    // Seed mock data if empty
+    //
+    
     LaunchedEffect(Unit) {
         coroutineScope.launch {
             vetRepository.syncVeterinarians()
@@ -106,54 +107,6 @@ fun VetDashboardScreen(
                 caseRepository.syncCases(vetId = currentVet?.id)
             } catch (e: Exception) {
                 Log.e("VetDashboard", "Failed to sync cases: ${e.localizedMessage}")
-            }
-        }
-        coroutineScope.launch {
-            if (allFarmers.isEmpty()) {
-                // Seed a mock farmer
-                val mockFarmer = FarmerProfile(
-                    id = "farmer_mock_1",
-                    name = "Rajesh Kumar",
-                    email = "rajesh.kumar@farm.com",
-                    phone = "+919876543210",
-                    accountStatus = "Active",
-                    lastActive = "5m ago",
-                    isOnline = true,
-                    farmName = "Greenfields Poultry Farm",
-                    farmLocation = "Pune, Maharashtra",
-                    totalSheds = 3,
-                    floorSpaceSqFt = 18000,
-                    deviceId = "ESP32-S3-01",
-                    deviceSerial = "SN-9823-PG",
-                    firmwareVersion = "v2.1.4",
-                    activeBatchId = "batch_2026_08",
-                    activeBatchStartDate = "2026-08-01",
-                    chickAgeDays = 18,
-                    feedConsumedKg = 450.0f,
-                    mortalitiesCount = 12,
-                    tempSensorStatus = "NORMAL",
-                    humidSensorStatus = "NORMAL",
-                    ammoniaSensorStatus = "WARNING",
-                    soundSensorStatus = "NORMAL",
-                    openDiseaseAlertsCount = 1,
-                    latestAlertText = "High Ammonia levels detected in Shed 2.",
-                    assignedVetName = currentVet?.name ?: "Dr. Sarah Jenkins",
-                    lastConsultationDate = "2026-08-10",
-                    consultationNotes = "Flock shows slight eye irritation. Ammonia levels high. Advise immediate ventilation cycle increase."
-                )
-                farmerProfileDao.insert(mockFarmer)
-            }
-            if (allCases.isEmpty()) {
-                // Seed mock cases
-                val mockAlert = caseRepository.createAlert(
-                    batchId = "batch_2026_08",
-                    deviceId = "ESP32-S3-01",
-                    predictionId = 101,
-                    title = "Shed 2 Respiratory Stress Warning",
-                    description = "Acoustic sensor detected frequent coughing and sneezing in chicken vocalisations.",
-                    severity = "CRITICAL"
-                )
-                caseRepository.requestVeterinaryReview(mockAlert.id)
             }
         }
     }
@@ -225,7 +178,6 @@ fun VetDashboardScreen(
         ) {
             when (currentTab) {
                 "dashboard" -> DashboardView(
-                    onLogout = onLogout,
                     currentVet = currentVet,
                     activeAvailability = activeAvailability,
                     allCases = allCases,
@@ -261,6 +213,7 @@ fun VetDashboardScreen(
                     context = context
                 )
                 "profile" -> ProfileView(
+                    onLogout = onLogout,
                     currentVet = currentVet,
                     allAlerts = allAlerts,
                     allCases = allCases,
@@ -277,7 +230,6 @@ fun VetDashboardScreen(
 // ----------------- 1. DASHBOARD VIEW -----------------
 @Composable
 fun DashboardView(
-    onLogout: () -> Unit,
     currentVet: com.poultryguard.ai.data.model.Veterinarian?,
     activeAvailability: String,
     allCases: List<VeterinaryCase>,
@@ -300,34 +252,11 @@ fun DashboardView(
     ) {
         // Header
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Poultry Guard AI Clinician",
-                        style = Typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = GreenPrimary
-                    )
-                    Text(
-                        text = (currentVet?.name ?: "Dr. Sarah Jenkins") + " 🩺",
-                        style = Typography.headlineMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                IconButton(
-                    onClick = onLogout,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(AlertRed.copy(alpha = 0.08f))
-                ) {
-                    Icon(Icons.Default.Logout, contentDescription = "Log Out", tint = AlertRed)
-                }
-            }
+            Text(
+                text = (currentVet?.name ?: "Dr. Sarah Jenkins") + " 🩺",
+                style = Typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         // Availability status switcher
@@ -1290,6 +1219,7 @@ fun ConsultationsView(
 // ----------------- 5. CLINICAL REPORTS, ALERTS & PROFILE VIEW -----------------
 @Composable
 fun ProfileView(
+    onLogout: () -> Unit,
     currentVet: com.poultryguard.ai.data.model.Veterinarian?,
     allAlerts: List<Alert>,
     allCases: List<VeterinaryCase>,
@@ -1400,6 +1330,31 @@ fun ProfileView(
                             VetProfileDetailRow(label = "Operating Region / Location", value = currentVet.location)
                         }
                     }
+                }
+            }
+
+            // Clean, red-themed Sign Out Button
+            item {
+                Button(
+                    onClick = onLogout,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AlertRed.copy(alpha = 0.08f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Logout,
+                        contentDescription = "Sign Out",
+                        tint = AlertRed
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Sign Out Account",
+                        color = AlertRed,
+                        style = Typography.bodyLarge,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         } else if (subTab == "alerts") {

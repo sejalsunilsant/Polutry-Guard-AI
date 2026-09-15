@@ -43,6 +43,7 @@ interface AuthRepository {
     suspend fun getPendingFarmers(): Result<List<com.poultryguard.ai.data.api.PendingFarmerDto>>
     suspend fun reviewFarmer(profileId: String, action: String, rejectionReason: String? = null): Result<Unit>
     suspend fun syncAllFarmers(): Result<Unit>
+    suspend fun syncAllKits(): Result<List<com.poultryguard.ai.data.model.HardwareKit>>
     suspend fun fetchUserContext(profileId: String): Result<com.poultryguard.ai.data.api.UserContextDto>
     suspend fun configureWifi(deviceId: String, ssid: String, password: String): Result<Unit>
 }
@@ -290,6 +291,38 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                 Result.success(Unit)
             } else {
                 Result.failure(Exception("Failed to fetch farmers from backend."))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun syncAllKits(): Result<List<com.poultryguard.ai.data.model.HardwareKit>> = withContext(Dispatchers.IO) {
+        try {
+            val api = getApi()
+            val response = api.listKits()
+            if (response.status == "success" && response.data != null) {
+                val kits = response.data.map { dto ->
+                    com.poultryguard.ai.data.model.HardwareKit(
+                        gatewayId = dto.id ?: "",
+                        kitId = if (!dto.kitId.isNullOrBlank()) dto.kitId else (dto.id ?: ""),
+                        farmerName = dto.farmerName ?: "",
+                        farmName = dto.farmName ?: "",
+                        farmerId = dto.farmerId ?: "",
+                        serialNumber = dto.serialNumber ?: "",
+                        firmwareVersion = dto.firmwareVersion ?: "",
+                        thingspeakChannelId = dto.thingspeakChannelId ?: "",
+                        thingspeakReadApiKey = dto.thingspeakReadApiKey ?: "",
+                        lifecycleStatus = dto.lifecycleStatus ?: (if (!dto.farmId.isNullOrBlank()) "Active" else "Available"),
+                        isProvisioned = !dto.farmId.isNullOrBlank(),
+                        isActive = !dto.farmId.isNullOrBlank(),
+                        provisionedAt = dto.createdAt ?: ""
+                    )
+                }
+                cacheManager.saveHardwareKits(kits)
+                Result.success(kits)
+            } else {
+                Result.failure(Exception(response.message ?: "Failed to fetch kits from backend."))
             }
         } catch (e: Exception) {
             Result.failure(e)

@@ -10,13 +10,13 @@ class ModelManager:
         """
         print("[Model Manager] Initializing and preloading all models...")
         
-        # Load Sensor model (XGBoost)
+        # Load Apurva Environmental model (XGBoost)
         SensorPredictor.load_model()
         
-        # Load Sound model (TFLite/ONNX/Fallback)
+        # Load Sound model (Existing TFLite/ONNX/Fallback preserved)
         SoundPredictor.load_model()
         
-        # Load Image model (ONNX/TFLite/Fallback)
+        # Load Apurva Visual model (PyTorch ResNet-18)
         ImagePredictor.load_model()
         
         print("[Model Manager] All models preloaded in memory and ready.")

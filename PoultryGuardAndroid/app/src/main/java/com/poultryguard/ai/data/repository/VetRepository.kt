@@ -73,22 +73,13 @@ class VetRepository(private val context: Context) {
         try {
             val api = getApi()
             if (api == null) {
-                android.util.Log.e("VetRepo", "syncVeterinarians: API is null, seeding mock vets")
-                seedMockVets()
                 return@withContext Result.failure(Exception("API not initialized."))
             }
             android.util.Log.d("VetRepo", "syncVeterinarians: calling API getAllVeterinarians...")
             val response = api.getAllVeterinarians()
-            android.util.Log.d("VetRepo", "syncVeterinarians: response status=${response.status}, data size=${response.data?.size}")
             if (response.status == "success" && response.data != null) {
                 val data = response.data
-                if (data.isEmpty()) {
-                    android.util.Log.w("VetRepo", "syncVeterinarians: server returned empty list, seeding mock vets")
-                    seedMockVets()
-                    return@withContext Result.success(Unit)
-                }
                 val vets = data.map { dto ->
-                    android.util.Log.d("VetRepo", "syncVeterinarians: mapping vet id=${dto.id}, name=${dto.name}, verificationStatus=${dto.verificationStatus}")
                     Veterinarian(
                         id = dto.id,
                         name = dto.name,
@@ -107,60 +98,18 @@ class VetRepository(private val context: Context) {
                     )
                 }
                 vetDao.deleteAll()
-                vetDao.insertAll(vets)
+                if (vets.isNotEmpty()) {
+                    vetDao.insertAll(vets)
+                }
                 val verifiedAfterSync = vetDao.getVerifiedCount()
                 android.util.Log.d("VetRepo", "syncVeterinarians: SUCCESS. Inserted ${vets.size} vets. Verified count in DB=$verifiedAfterSync")
                 Result.success(Unit)
             } else {
-                android.util.Log.w("VetRepo", "syncVeterinarians: status not success or data null, seeding mock vets")
-                seedMockVets()
                 Result.failure(Exception("Failed to fetch veterinarians from backend."))
             }
         } catch (e: Exception) {
             android.util.Log.e("VetRepo", "syncVeterinarians: EXCEPTION: ${e.message}", e)
-            seedMockVets()
             Result.failure(e)
-        }
-    }
-
-    private suspend fun seedMockVets() {
-        val verifiedCount = vetDao.getVerifiedCount()
-        if (verifiedCount == 0) {
-            val mockVets = listOf(
-                Veterinarian(
-                    id = "vet_1",
-                    name = "Dr. Ramesh Kumar",
-                    specialty = "Avian Pathology",
-                    phone = "+919876543210",
-                    email = "ramesh@poultryguard.ai",
-                    location = "Ludhiana, Punjab",
-                    photoUrl = "https://randomuser.me/api/portraits/men/32.jpg",
-                    availability = "Available",
-                    verificationStatus = "VERIFIED",
-                    licenseNumber = "VET-IND-2021-9981",
-                    qualification = "M.V.Sc (Avian Medicine)",
-                    experience = 8,
-                    latitude = 18.5204,
-                    longitude = 73.8567
-                ),
-                Veterinarian(
-                    id = "vet_2",
-                    name = "Dr. Priya Patel",
-                    specialty = "Poultry Nutrition",
-                    phone = "+918765432109",
-                    email = "priya@poultryguard.ai",
-                    location = "Anand, Gujarat",
-                    photoUrl = "https://randomuser.me/api/portraits/women/44.jpg",
-                    availability = "Available",
-                    verificationStatus = "VERIFIED",
-                    licenseNumber = "VET-IND-2018-4521",
-                    qualification = "Ph.D. in Poultry Science",
-                    experience = 12,
-                    latitude = 22.5645,
-                    longitude = 72.9289
-                )
-            )
-            vetDao.insertAll(mockVets)
         }
     }
 }

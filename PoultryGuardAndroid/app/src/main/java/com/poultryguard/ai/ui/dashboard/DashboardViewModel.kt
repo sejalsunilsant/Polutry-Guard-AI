@@ -259,7 +259,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     // Conversational Chat logic with active Farm Context
     fun sendChatMessage(text: String) {
-        if (text.isBlank()) return
+        if (text.isBlank() || _isTyping.value) return
         
         val userMsg = ChatMessage(sender = "USER", text = text)
         _chatMessages.value = _chatMessages.value + userMsg

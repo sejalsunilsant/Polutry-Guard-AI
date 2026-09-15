@@ -1,141 +1,134 @@
+from __future__ import annotations
+
 import os
-import json
+from typing import Any, Dict, List, Union
 import numpy as np
 import pandas as pd
-from xgboost import XGBClassifier
+
+from Apurva_Model.Environment.environmental_predictor import (
+    CLASS_MAPPING,
+    ENVIRONMENTAL_CLASSES,
+    load_environmental_model,
+    load_environmental_preprocessor,
+    predict_environmental_risk,
+    normalize_probabilities,
+)
+
 
 class SensorPredictor:
     _model = None
-    _classes = None
+    _preprocessor = None
+    _classes = ["Healthy", "Fowlpox", "Infectious Coryza"]
 
     @classmethod
     def load_model(cls):
         """
-        Load XGBoost model and disease classes once (Singleton).
+        Load XGBoost environmental model and preprocessor once (Singleton).
         """
-        if cls._model is not None:
+        if cls._model is not None and cls._preprocessor is not None:
             return cls._model, cls._classes
-            
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        model_path = os.path.join(base_dir, "model", "xgboost_model.json")
-        classes_path = os.path.join(base_dir, "model", "disease_classes.json")
-        
-        if os.path.exists(model_path) and os.path.exists(classes_path):
-            try:
-                print(f"[Sensor Predictor] Loading XGBoost model from: {model_path}")
-                cls._model = XGBClassifier()
-                cls._model.load_model(model_path)
-                
-                with open(classes_path, "r", encoding="utf-8") as f:
-                    cls._classes = json.load(f)
-                    
-                print(f"[Sensor Predictor] Model and classes ({cls._classes}) loaded successfully.")
-            except Exception as e:
-                print(f"[Sensor Predictor] Error loading model files: {e}")
-                cls._model = None
-                cls._classes = ["Coccidiosis", "Fowlpox", "Healthy", "Infectious Bronchitis", "Newcastle"]
-        else:
-            print(f"[Sensor Predictor] WARNING: Model files not found at {model_path}. Fallback mock mode enabled.")
+
+        try:
+            print("[Sensor Predictor] Loading Apurva XGBoost model and preprocessor...")
+            cls._model = load_environmental_model()
+            cls._preprocessor = load_environmental_preprocessor()
+            cls._classes = list(ENVIRONMENTAL_CLASSES)
+            print(f"[Sensor Predictor] Apurva Environmental Model loaded successfully with classes: {cls._classes}")
+        except Exception as e:
+            print(f"[Sensor Predictor] Error loading Apurva environmental model: {e}")
             cls._model = None
-            cls._classes = ["Coccidiosis", "Fowlpox", "Healthy", "Infectious Bronchitis", "Newcastle"]
-            
+            cls._preprocessor = None
+            cls._classes = ["Healthy", "Fowlpox", "Infectious Coryza"]
+
         return cls._model, cls._classes
 
     @classmethod
-    def predict(cls, sensor_features):
+    def predict(cls, sensor_features: Union[List[float], Dict[str, Any], np.ndarray]) -> Dict[str, Any]:
         """
         Predict disease incidence using environmental sensor features.
-        Args:
-            sensor_features (list): Preprocessed list [temperature, humidity, ammonia]
+        Supports:
+            - list/tuple: [temperature, humidity, ammonia] or [temperature, humidity]
+            - dict: {'temperature': ..., 'humidity': ..., 'ammonia': ..., 'breed': ..., 'mortality_rate': ...}
+
         Returns:
             dict: {
-                "prediction": str ("Healthy" | "Coccidiosis" | "Newcastle" | "Avian Influenza" | "Fowlpox" | "Infectious Bronchitis"),
+                "prediction": str ("Healthy" | "Fowlpox" | "Infectious Coryza"),
                 "confidence": float,
                 "probabilities": dict mapping class -> float probability,
                 "status": str ("success" | "fallback" | "error")
             }
         """
         cls.load_model()
-        
-        if not sensor_features or len(sensor_features) < 2:
+
+        if sensor_features is None:
             return {
                 "prediction": "Healthy",
                 "confidence": 0.0,
-                "probabilities": {},
+                "probabilities": {"Healthy": 1.0, "Fowlpox": 0.0, "Infectious Coryza": 0.0},
                 "status": "error",
-                "message": "Invalid sensor features array. Expected [temperature, humidity, ammonia]"
-            }
-            
-        temp = float(sensor_features[0])
-        hum = float(sensor_features[1])
-        
-        # XGBoost model expects humidity as a fraction [0.0, 1.0] matching training distribution
-        if hum > 1.0:
-            hum_fraction = hum / 100.0
-        else:
-            hum_fraction = hum
-            
-        if cls._model is None:
-            # Fallback mock mode: deterministic calculations based on stress thresholds
-            probabilities = {c: 0.05 for c in cls._classes}
-            if temp >= 30.0:
-                probabilities["Infectious Bronchitis"] = 0.50
-                probabilities["Newcastle"] = 0.30
-                probabilities["Healthy"] = 0.10
-            elif hum_fraction >= 0.75:
-                probabilities["Coccidiosis"] = 0.60
-                probabilities["Healthy"] = 0.25
-                probabilities["Fowlpox"] = 0.10
-            else:
-                probabilities["Healthy"] = 0.80
-                probabilities["Coccidiosis"] = 0.05
-                probabilities["Fowlpox"] = 0.05
-                
-            pred_class = max(probabilities, key=probabilities.get)
-            
-            # Ensure all 6 categories exist in output
-            probs_dict = {c: float(probabilities.get(c, 0.05)) for c in cls._classes}
-            probs_dict["Avian Influenza"] = 0.05
-            
-            return {
-                "prediction": pred_class,
-                "confidence": float(probs_dict[pred_class]),
-                "probabilities": probs_dict,
-                "status": "fallback"
+                "message": "Sensor features cannot be None",
             }
 
-        try:
-            # Prepare feature DataFrame matching training columns
-            df_features = pd.DataFrame(
-                [[temp, hum_fraction]], 
-                columns=["Temperature", "Humidity"]
-            )
-            
-            # Predict probabilities
-            probabilities = cls._model.predict_proba(df_features)[0]
-            pred_idx = int(np.argmax(probabilities))
-            
-            prediction = cls._classes[pred_idx]
-            confidence = float(probabilities[pred_idx])
-            
-            probs_dict = {cls._classes[i]: float(probabilities[i]) for i in range(len(cls._classes))}
-            
-            # Ensure Avian Influenza is present in dict (as 0.0 risk from temp/humidity if not in classes)
-            if "Avian Influenza" not in probs_dict:
-                probs_dict["Avian Influenza"] = 0.0
-                
-            return {
-                "prediction": prediction,
-                "confidence": confidence,
-                "probabilities": probs_dict,
-                "status": "success"
+        # Parse inputs into payload dictionary
+        payload: Dict[str, Any] = {}
+        if isinstance(sensor_features, (list, tuple, np.ndarray)):
+            if len(sensor_features) < 2:
+                return {
+                    "prediction": "Healthy",
+                    "confidence": 0.0,
+                    "probabilities": {"Healthy": 1.0, "Fowlpox": 0.0, "Infectious Coryza": 0.0},
+                    "status": "error",
+                    "message": "Expected at least [temperature, humidity]",
+                }
+            temp = float(sensor_features[0])
+            hum = float(sensor_features[1])
+            ammonia = float(sensor_features[2]) if len(sensor_features) > 2 else 10.0
+            payload = {
+                "temperature": temp,
+                "humidity": hum,
+                "ammonia": ammonia,
             }
-        except Exception as e:
-            print(f"[Sensor Predictor] Prediction error: {e}")
+        elif isinstance(sensor_features, dict):
+            payload = dict(sensor_features)
+        else:
             return {
                 "prediction": "Healthy",
                 "confidence": 0.0,
-                "probabilities": {},
+                "probabilities": {"Healthy": 1.0, "Fowlpox": 0.0, "Infectious Coryza": 0.0},
                 "status": "error",
-                "message": f"Inference execution failed: {str(e)}"
+                "message": f"Unsupported sensor features type: {type(sensor_features)}",
             }
+
+        # Execute prediction with Apurva model
+        if cls._model is not None and cls._preprocessor is not None:
+            try:
+                res = predict_environmental_risk(payload)
+                return {
+                    "prediction": res["predicted_class"],
+                    "confidence": float(res["confidence"]),
+                    "probabilities": res["probabilities"],
+                    "status": "success",
+                    "model": "XGBoost (Apurva)",
+                }
+            except Exception as ex:
+                print(f"[Sensor Predictor] Prediction error with Apurva model: {ex}. Falling back...")
+
+        # Graceful fallback heuristic mode if model artifact is unavailable
+        temp = float(payload.get("temperature", payload.get("temp", 22.0)))
+        hum = float(payload.get("humidity", payload.get("hum", 60.0)))
+        nh3 = float(payload.get("ammonia", 10.0))
+
+        probs = {"Healthy": 0.85, "Fowlpox": 0.08, "Infectious Coryza": 0.07}
+        if nh3 >= 25.0 or temp >= 32.0:
+            probs = {"Healthy": 0.15, "Fowlpox": 0.20, "Infectious Coryza": 0.65}
+        elif hum >= 80.0:
+            probs = {"Healthy": 0.30, "Fowlpox": 0.45, "Infectious Coryza": 0.25}
+
+        pred_class = max(probs, key=probs.get)
+        return {
+            "prediction": pred_class,
+            "confidence": float(probs[pred_class]),
+            "probabilities": probs,
+            "status": "fallback",
+            "model": "XGBoost Heuristic Fallback",
+        }
