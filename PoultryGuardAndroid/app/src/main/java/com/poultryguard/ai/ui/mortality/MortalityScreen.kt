@@ -28,9 +28,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.poultryguard.ai.data.model.MortalityRecord
 import com.poultryguard.ai.ui.theme.*
+import com.poultryguard.ai.ui.localization.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.BorderStroke
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -44,8 +48,27 @@ fun MortalityScreen(
     val submissionSuccess by viewModel.submissionSuccess.collectAsState()
 
     val cacheManager = remember { com.poultryguard.ai.data.cache.LocalCacheManager(context.applicationContext) }
-    val activeBatch = remember(submissionSuccess) { cacheManager.getCachedActiveBatch() }
-    val activeBatchId = activeBatch?.id ?: ""
+    val batchRepository = remember { com.poultryguard.ai.data.repository.BatchRepository(context.applicationContext) }
+    var activeBatch by remember { mutableStateOf(cacheManager.getCachedActiveBatch()) }
+    val localBatch = activeBatch
+    val activeBatchId = localBatch?.id ?: ""
+
+    val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(context.applicationContext) }
+    val veterinarians by vetRepository.getVeterinariansFlow().collectAsState(initial = emptyList())
+    val caseRepository = remember { com.poultryguard.ai.data.repository.VeterinaryCaseRepository(context.applicationContext) }
+    val alerts by caseRepository.getAllAlertsFlow().collectAsState(initial = emptyList())
+    val cases by caseRepository.getAllCasesFlow().collectAsState(initial = emptyList())
+
+    var selectedVetForRequest by remember { mutableStateOf<com.poultryguard.ai.data.model.Veterinarian?>(null) }
+    var dropdownExpanded by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    LaunchedEffect(activeBatchId) {
+        vetRepository.syncVeterinarians()
+        if (activeBatchId.isNotBlank()) {
+            caseRepository.syncAlerts(activeBatchId)
+            caseRepository.syncCases(batchId = activeBatchId)
+        }
+    }
     val filteredRecords = remember(records, activeBatchId) {
         if (activeBatchId.isNotBlank()) {
             records.filter { it.batchId == activeBatchId }
@@ -78,8 +101,8 @@ fun MortalityScreen(
             .maxByOrNull { it.value.sumOf { r -> r.deathCount } }?.key ?: "None"
     } else "None"
 
-    val mortRate = if (activeBatch != null && activeBatch.initialCount > 0) {
-        (totalDeaths.toFloat() / activeBatch.initialCount * 100).coerceAtLeast(0f)
+    val mortRate = if (localBatch != null && localBatch.initialCount > 0) {
+        (totalDeaths.toFloat() / localBatch.initialCount * 100).coerceAtLeast(0f)
     } else 0f
 
     val uiError by viewModel.uiError.collectAsState()
@@ -94,6 +117,26 @@ fun MortalityScreen(
             selectedCause = causesList[0]
             customCause = ""
             viewModel.resetSubmissionStatus()
+            activeBatch = cacheManager.getCachedActiveBatch()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        coroutineScope.launch {
+            vetRepository.syncVeterinarians()
+        }
+        val userProfile = cacheManager.getCachedUserProfile()
+        userProfile?.farmId?.let { farmId ->
+            val res = batchRepository.getActiveBatch(farmId)
+            res.fold(
+                onSuccess = { batch ->
+                    activeBatch = batch
+                },
+                onFailure = {
+                    // fallback to cache
+                    activeBatch = cacheManager.getCachedActiveBatch()
+                }
+            )
         }
     }
 
@@ -438,6 +481,147 @@ fun MortalityScreen(
                                 MiniMetricColumn("Humid", "%.1f%%".format(avgHumid), BlueSecondary)
                                 MiniMetricColumn("Ammonia", "%.1f ppm".format(avgAmmonia), AlertRed)
                                 MiniMetricColumn("Sound", "%.0f dB".format(avgSound), Color.Magenta)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 2.5: Veterinary Assistance request dropdown & status
+        item {
+            android.util.Log.d("MortScreen", "VetAssist: localBatch=${localBatch?.id}, veterinarians.size=${veterinarians.size}")
+            if (localBatch != null) {
+                val verifiedVets = veterinarians.filter { it.verificationStatus == "VERIFIED" }
+                val activeAlert = alerts.find { it.batchId == activeBatchId && it.status == "UNRESOLVED" && !it.title.contains("Healthy", ignoreCase = true) }
+                val activeCase = cases.find { it.batchId == activeBatchId && it.status != "RESOLVED" }
+                android.util.Log.d("MortScreen", "VetAssist: verifiedVets.size=${verifiedVets.size}, activeCase=${activeCase?.id}, activeAlert=${activeAlert?.id}")
+                veterinarians.forEach { v ->
+                    android.util.Log.d("MortScreen", "  vet: id=${v.id}, name=${v.name}, verificationStatus='${v.verificationStatus}'")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = CardSurface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Veterinary Assistance", style = Typography.bodyLarge, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (activeCase != null) AlertOrange.copy(alpha = 0.1f) else GreenPrimary.copy(alpha = 0.1f))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = if (activeCase != null) "Request Open (${activeCase.status})" else "No Active Request",
+                                    color = if (activeCase != null) AlertOrange else GreenPrimary,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Divider(color = DividerColor)
+
+                        if (activeCase != null) {
+                            val assignedVet = veterinarians.find { it.id == activeCase.veterinarianId }
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Status: An active consultation is open for this batch.", style = Typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                if (assignedVet != null) {
+                                    Text("Assigned Vet: ${assignedVet.name} (${assignedVet.specialty})", style = Typography.bodyMedium, color = TextMedium)
+                                    Text("Phone: ${assignedVet.phone}", style = Typography.bodySmall, color = TextMedium)
+                                } else {
+                                    Text("Assigned Vet: Waiting for claims...", style = Typography.bodyMedium, color = TextMedium)
+                                }
+                                if (activeCase.diagnosis != null) {
+                                    Text("Diagnosis: ${activeCase.diagnosis}", style = Typography.bodyMedium, fontWeight = FontWeight.Bold, color = AlertOrange)
+                                    Text("Recommendation: ${activeCase.recommendation}", style = Typography.bodySmall, color = TextDark)
+                                }
+                            }
+                        } else {
+                            if (verifiedVets.isEmpty()) {
+                                Text("No verified veterinarians available near you at the moment.", style = Typography.bodyMedium, color = TextMedium)
+                            } else {
+                                Text("If you suspect disease outbreak or need consultation, choose a nearby veterinarian below:", style = Typography.bodyMedium, color = TextMedium)
+                                
+                                Box(modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { dropdownExpanded = true },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, DividerColor)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = selectedVetForRequest?.let { "${it.name} (${it.specialty})" } ?: "Select Veterinarian",
+                                                color = if (selectedVetForRequest != null) TextDark else TextMedium
+                                            )
+                                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = TextMedium)
+                                        }
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = dropdownExpanded,
+                                        onDismissRequest = { dropdownExpanded = false },
+                                        modifier = Modifier.fillMaxWidth(0.9f)
+                                    ) {
+                                        verifiedVets.forEach { vet ->
+                                            DropdownMenuItem(
+                                                text = { Text("${vet.name} - ${vet.specialty} (${vet.location})") },
+                                                onClick = {
+                                                    selectedVetForRequest = vet
+                                                    dropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Button(
+                                    onClick = {
+                                        val vet = selectedVetForRequest
+                                        if (vet != null) {
+                                            coroutineScope.launch {
+                                                val res = caseRepository.createManualVetRequest(
+                                                    batchId = activeBatchId,
+                                                    vetId = vet.id,
+                                                    diseaseAlertId = activeAlert?.id
+                                                )
+                                                res.fold(
+                                                    onSuccess = {
+                                                        Toast.makeText(context, "Veterinary request submitted successfully!", Toast.LENGTH_SHORT).show()
+                                                        selectedVetForRequest = null
+                                                        // Refresh cases list
+                                                        caseRepository.syncCases(batchId = activeBatchId)
+                                                    },
+                                                    onFailure = {
+                                                        Toast.makeText(context, "Request failed: ${it.localizedMessage}", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                )
+                                            }
+                                        } else {
+                                            Toast.makeText(context, "Please select a veterinarian first.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = AlertOrange)
+                                ) {
+                                    Text("Request Veterinarian Consultation", color = Color.White, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }

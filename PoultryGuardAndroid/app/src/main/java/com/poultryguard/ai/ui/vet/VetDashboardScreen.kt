@@ -3,6 +3,7 @@ package com.poultryguard.ai.ui.vet
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -81,62 +82,31 @@ fun VetDashboardScreen(
     val allAlerts by caseRepository.getAllAlertsFlow().collectAsState(initial = emptyList())
     val allFarmers by farmerProfileDao.getAllFarmersFlow().collectAsState(initial = emptyList())
     val allMortality by caseRepository.getAllMortalityRecordsFlow().collectAsState(initial = emptyList())
-    val allConsultations by caseRepository.getConsultationsForVetFlow(currentVet?.id ?: "vet_1").collectAsState(initial = emptyList())
+    val allConsultations by caseRepository.getConsultationsForVetFlow(currentVet?.id ?: "").collectAsState(initial = emptyList())
 
     // Tabs navigation state
     var currentTab by remember { mutableStateOf("dashboard") }
 
-    // Seed mock data if empty
+    //
+    
     LaunchedEffect(Unit) {
         coroutineScope.launch {
             vetRepository.syncVeterinarians()
         }
         coroutineScope.launch {
-            if (allFarmers.isEmpty()) {
-                // Seed a mock farmer
-                val mockFarmer = FarmerProfile(
-                    id = "farmer_mock_1",
-                    name = "Rajesh Kumar",
-                    email = "rajesh.kumar@farm.com",
-                    phone = "+919876543210",
-                    accountStatus = "Active",
-                    lastActive = "5m ago",
-                    isOnline = true,
-                    farmName = "Greenfields Poultry Farm",
-                    farmLocation = "Pune, Maharashtra",
-                    totalSheds = 3,
-                    floorSpaceSqFt = 18000,
-                    deviceId = "ESP32-S3-01",
-                    deviceSerial = "SN-9823-PG",
-                    firmwareVersion = "v2.1.4",
-                    activeBatchId = "batch_2026_08",
-                    activeBatchStartDate = "2026-08-01",
-                    chickAgeDays = 18,
-                    feedConsumedKg = 450.0f,
-                    mortalitiesCount = 12,
-                    tempSensorStatus = "NORMAL",
-                    humidSensorStatus = "NORMAL",
-                    ammoniaSensorStatus = "WARNING",
-                    soundSensorStatus = "NORMAL",
-                    openDiseaseAlertsCount = 1,
-                    latestAlertText = "High Ammonia levels detected in Shed 2.",
-                    assignedVetName = currentVet?.name ?: "Dr. Sarah Jenkins",
-                    lastConsultationDate = "2026-08-10",
-                    consultationNotes = "Flock shows slight eye irritation. Ammonia levels high. Advise immediate ventilation cycle increase."
-                )
-                farmerProfileDao.insert(mockFarmer)
+            try {
+                val authRepo = com.poultryguard.ai.data.repository.SupabaseAuthRepository(context.applicationContext)
+                authRepo.syncAllFarmers()
+            } catch (e: Exception) {
+                Log.e("VetDashboard", "Failed to sync farmers: ${e.localizedMessage}")
             }
-            if (allCases.isEmpty()) {
-                // Seed mock cases
-                val mockAlert = caseRepository.createAlert(
-                    batchId = "batch_2026_08",
-                    deviceId = "ESP32-S3-01",
-                    predictionId = 101,
-                    title = "Shed 2 Respiratory Stress Warning",
-                    description = "Acoustic sensor detected frequent coughing and sneezing in chicken vocalisations.",
-                    severity = "CRITICAL"
-                )
-                caseRepository.requestVeterinaryReview(mockAlert.id)
+        }
+        coroutineScope.launch {
+            try {
+                caseRepository.syncAlerts()
+                caseRepository.syncCases(vetId = currentVet?.id)
+            } catch (e: Exception) {
+                Log.e("VetDashboard", "Failed to sync cases: ${e.localizedMessage}")
             }
         }
     }
@@ -208,7 +178,6 @@ fun VetDashboardScreen(
         ) {
             when (currentTab) {
                 "dashboard" -> DashboardView(
-                    onLogout = onLogout,
                     currentVet = currentVet,
                     activeAvailability = activeAvailability,
                     allCases = allCases,
@@ -223,6 +192,7 @@ fun VetDashboardScreen(
                     allCases = allCases,
                     allAlerts = allAlerts,
                     allFarmers = allFarmers,
+                    allMortality = allMortality,
                     caseRepository = caseRepository,
                     diseaseRepository = diseaseRepository,
                     coroutineScope = coroutineScope,
@@ -243,6 +213,7 @@ fun VetDashboardScreen(
                     context = context
                 )
                 "profile" -> ProfileView(
+                    onLogout = onLogout,
                     currentVet = currentVet,
                     allAlerts = allAlerts,
                     allCases = allCases,
@@ -259,7 +230,6 @@ fun VetDashboardScreen(
 // ----------------- 1. DASHBOARD VIEW -----------------
 @Composable
 fun DashboardView(
-    onLogout: () -> Unit,
     currentVet: com.poultryguard.ai.data.model.Veterinarian?,
     activeAvailability: String,
     allCases: List<VeterinaryCase>,
@@ -282,34 +252,11 @@ fun DashboardView(
     ) {
         // Header
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Poultry Guard AI Clinician",
-                        style = Typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = GreenPrimary
-                    )
-                    Text(
-                        text = (currentVet?.name ?: "Dr. Sarah Jenkins") + " 🩺",
-                        style = Typography.headlineMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                IconButton(
-                    onClick = onLogout,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(AlertRed.copy(alpha = 0.08f))
-                ) {
-                    Icon(Icons.Default.Logout, contentDescription = "Log Out", tint = AlertRed)
-                }
-            }
+            Text(
+                text = (currentVet?.name ?: "Dr. Sarah Jenkins") + " 🩺",
+                style = Typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
         }
 
         // Availability status switcher
@@ -505,6 +452,7 @@ fun CasesView(
     allCases: List<VeterinaryCase>,
     allAlerts: List<Alert>,
     allFarmers: List<FarmerProfile>,
+    allMortality: List<com.poultryguard.ai.data.model.MortalityRecord>,
     caseRepository: VeterinaryCaseRepository,
     diseaseRepository: DiseasePredictionRepository,
     coroutineScope: kotlinx.coroutines.CoroutineScope,
@@ -567,12 +515,24 @@ fun CasesView(
             } else {
                 items(pending) { case ->
                     val alert = allAlerts.find { it.id == case.alertId }
+                    val farmer = allFarmers.find { it.activeBatchId == case.batchId }
+                    val records = allMortality.filter { it.batchId == case.batchId }
+                    val totalDeaths = records.sumOf { it.deathCount }
+                    val predominantCause = if (records.isNotEmpty()) {
+                        records.groupBy { it.suspectedCause }
+                            .maxByOrNull { it.value.sumOf { r -> r.deathCount } }?.key ?: "N/A"
+                    } else "N/A"
+                    
+                    val date = java.util.Date(case.createdAt)
+                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                    val creationTimeStr = sdf.format(date)
+
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = CardSurface)
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -583,10 +543,24 @@ fun CasesView(
                                     Text("Unassigned", color = AlertOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
                             Text(text = alert?.description ?: "No description provided.", style = Typography.bodyMedium, color = TextMedium)
                             
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Divider(color = DividerColor)
+
+                            // Farmer & Farm Details
+                            Text("Farmer: ${farmer?.name ?: "Unspecified Farmer"}", style = Typography.bodyMedium, fontWeight = FontWeight.Bold)
+                            Text("Farm Name: ${farmer?.farmName ?: "Unspecified Farm"}", style = Typography.bodySmall, color = TextMedium)
+                            Text("Location: ${farmer?.farmLocation ?: "Unspecified Location"}", style = Typography.bodySmall, color = TextMedium)
+
+                            // Batch & Mortality Details
+                            Text("Batch ID: ${case.batchId}", style = Typography.bodySmall, color = TextMedium)
+                            Text("Chick Age: ${farmer?.chickAgeDays ?: 0} days", style = Typography.bodySmall, color = TextMedium)
+                            Text("Total Deaths: $totalDeaths birds", style = Typography.bodySmall, color = AlertRed, fontWeight = FontWeight.Bold)
+                            Text("Predominant Cause: $predominantCause", style = Typography.bodySmall, color = AlertOrange, fontWeight = FontWeight.Bold)
+
+                            Text("Requested: $creationTimeStr", style = Typography.labelSmall, color = TextMedium)
+
+                            Spacer(modifier = Modifier.height(4.dp))
                             Button(
                                 onClick = {
                                     coroutineScope.launch {
@@ -658,8 +632,25 @@ fun CasesView(
                             }
 
                             // Farmer Info
+                            val records = allMortality.filter { it.batchId == case.batchId }
+                            val totalDeaths = records.sumOf { it.deathCount }
+                            val predominantCause = if (records.isNotEmpty()) {
+                                records.groupBy { it.suspectedCause }
+                                    .maxByOrNull { it.value.sumOf { r -> r.deathCount } }?.key ?: "N/A"
+                            } else "N/A"
+                            
+                            val date = java.util.Date(case.createdAt)
+                            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                            val creationTimeStr = sdf.format(date)
+
                             Text("Farmer: ${farmer?.name ?: "Rajesh Kumar"}", style = Typography.bodyMedium, fontWeight = FontWeight.Bold)
+                            Text("Farm Name: ${farmer?.farmName ?: "Rajesh Broiler Farms"}", style = Typography.bodySmall, color = TextMedium)
                             Text("Farm Location: ${farmer?.farmLocation ?: "Pune"}", style = Typography.bodySmall, color = TextMedium)
+                            Text("Batch ID: ${case.batchId}", style = Typography.bodySmall, color = TextMedium)
+                            Text("Chick Age: ${farmer?.chickAgeDays ?: 0} days", style = Typography.bodySmall, color = TextMedium)
+                            Text("Total Deaths: $totalDeaths birds", style = Typography.bodySmall, color = AlertRed, fontWeight = FontWeight.Bold)
+                            Text("Predominant Cause: $predominantCause", style = Typography.bodySmall, color = AlertOrange, fontWeight = FontWeight.Bold)
+                            Text("Requested: $creationTimeStr", style = Typography.labelSmall, color = TextMedium)
 
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
@@ -690,6 +681,29 @@ fun CasesView(
                                     Icon(Icons.Default.Sms, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("SMS Message", fontSize = 11.sp)
+                                }
+                            }
+
+                            val farmLat = farmer?.latitude
+                            val farmLng = farmer?.longitude
+                            if (farmLat != null && farmLng != null) {
+                                Button(
+                                    onClick = {
+                                        val url = "https://www.google.com/maps/dir/?api=1&destination=$farmLat,$farmLng"
+                                        try {
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            Log.e("VetDashboard", "Failed to launch maps navigation: ${e.localizedMessage}")
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary)
+                                ) {
+                                    Icon(Icons.Default.Navigation, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Navigate to Farm", color = Color.White, fontWeight = FontWeight.Bold)
                                 }
                             }
 
@@ -1205,6 +1219,7 @@ fun ConsultationsView(
 // ----------------- 5. CLINICAL REPORTS, ALERTS & PROFILE VIEW -----------------
 @Composable
 fun ProfileView(
+    onLogout: () -> Unit,
     currentVet: com.poultryguard.ai.data.model.Veterinarian?,
     allAlerts: List<Alert>,
     allCases: List<VeterinaryCase>,
@@ -1315,6 +1330,31 @@ fun ProfileView(
                             VetProfileDetailRow(label = "Operating Region / Location", value = currentVet.location)
                         }
                     }
+                }
+            }
+
+            // Clean, red-themed Sign Out Button
+            item {
+                Button(
+                    onClick = onLogout,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AlertRed.copy(alpha = 0.08f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Logout,
+                        contentDescription = "Sign Out",
+                        tint = AlertRed
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Sign Out Account",
+                        color = AlertRed,
+                        style = Typography.bodyLarge,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         } else if (subTab == "alerts") {

@@ -1,162 +1,122 @@
 import os
+from typing import Any, Dict, Optional, Tuple
 from data.supabase_client import save_prediction
+from ml.fusion.sound_adapter import SoundAdapter
 
-def fuse_decisions(temp, hum, ammonia, sensor_pred, sound_pred, image_pred, egg_drop=False, feed_drop=False, recent_deaths=0):
+def fuse_decisions(
+    temp: Optional[float] = None,
+    hum: Optional[float] = None,
+    ammonia: Optional[float] = None,
+    sensor_pred: Optional[Dict[str, Any]] = None,
+    sound_pred: Optional[Dict[str, Any]] = None,
+    image_pred: Optional[Dict[str, Any]] = None,
+    egg_drop: bool = False,
+    feed_drop: bool = False,
+    recent_deaths: int = 0,
+) -> Tuple[str, float, Dict[str, float]]:
     """
-    Weighted decision fusion engine combining environmental sensors (XGBoost),
-    audio monitoring (TFLite/ONNX), and image monitoring (Heuristics/ONNX).
+    Weighted decision fusion engine combining Apurva's environmental XGBoost model,
+    the existing audio monitoring model (via SoundAdapter), and Apurva's visual ResNet-18 model.
+    
+    Target Categories:
+        - Healthy
+        - Fowlpox
+        - Infectious Coryza
     
     Returns:
         tuple: (fused_disease, confidence, probabilities)
     """
-    # Specific target categories
-    classes = ["Healthy", "Coccidiosis", "Newcastle", "Avian Influenza", "Fowlpox", "Infectious Bronchitis"]
+    classes = ["Healthy", "Fowlpox", "Infectious Coryza"]
     prob_map = {c: 0.0 for c in classes}
     
     # 1. Base weights for active modalities
-    w_sensor = 0.35  # Environment prior
-    w_sound = 0.40   # Acoustic monitoring
-    w_image = 0.25   # Visual behavior monitoring
+    w_sensor = 0.35  # Environmental prior (Apurva XGBoost)
+    w_sound = 0.35   # Acoustic monitoring (Existing Sound model via Adapter)
+    w_image = 0.30   # Visual disease monitoring (Apurva ResNet-18)
     
-    # Adjust weights if any modality failed or is missing
-    active_modalities = 3
+    # Adapt sound model outputs into fusion feature representation
+    sound_adapted = SoundAdapter.adapt_for_fusion(sound_pred)
+
+    # Adjust weights if any modality is missing or failed
     if not sensor_pred or sensor_pred.get("status") == "error":
-        active_modalities -= 1
         w_sensor = 0.0
-    if not sound_pred or sound_pred.get("status") == "error":
-        active_modalities -= 1
+    if not sound_adapted.get("active"):
         w_sound = 0.0
     if not image_pred or image_pred.get("status") == "error":
-        active_modalities -= 1
         w_image = 0.0
         
-    # Re-normalize weights if some modalities are missing
+    # Re-normalize weights if some modalities are inactive
     total_w = w_sensor + w_sound + w_image
     if total_w > 0.0:
         w_sensor /= total_w
         w_sound /= total_w
         w_image /= total_w
     else:
-        # Fallback if everything is broken
-        return "Healthy", 1.0, {"Healthy": 1.0, "Coccidiosis": 0.0, "Newcastle": 0.0, "Avian Influenza": 0.0, "Fowlpox": 0.0, "Infectious Bronchitis": 0.0}
+        # Fallback if all modalities are unavailable
+        return "Healthy", 1.0, {"Healthy": 1.0, "Fowlpox": 0.0, "Infectious Coryza": 0.0}
 
-    # 2. Add Sensor (XGBoost) Environmental Context Contribution (Prior Probability)
-    # The XGBoost model predicts: Coccidiosis, Fowlpox, Healthy, Infectious Bronchitis, Newcastle.
-    # Note: Avian Influenza is mapped dynamically as environmental context prior.
+    # 2. Add Sensor (Apurva XGBoost) Environmental Context Contribution (Prior Probability)
     if w_sensor > 0.0:
         sensor_probs = sensor_pred.get("probabilities") or {}
-        for key, p in sensor_probs.items():
-            if key in prob_map:
-                prob_map[key] += p * w_sensor
-                
-        # Temperature + Humidity cold stress adjustment: Avian Influenza is highly associated with cold stress
-        if temp is not None and float(temp) < 18.0:
-            # Shift some of the environmental prior to Avian Influenza
-            ib_prior = sensor_probs.get("Infectious Bronchitis", 0.0)
-            nc_prior = sensor_probs.get("Newcastle", 0.0)
-            shift = (ib_prior * 0.4 + nc_prior * 0.4) * w_sensor
-            prob_map["Avian Influenza"] += shift
-            prob_map["Infectious Bronchitis"] = max(0.0, prob_map["Infectious Bronchitis"] - (ib_prior * 0.4 * w_sensor))
-            prob_map["Newcastle"] = max(0.0, prob_map["Newcastle"] - (nc_prior * 0.4 * w_sensor))
+        for key in classes:
+            prob_map[key] += float(sensor_probs.get(key, 0.0)) * w_sensor
 
-    # 3. Add Sound Acoustic Symptoms Contribution
+    # 3. Add Sound Acoustic Symptoms Contribution (via SoundAdapter)
     if w_sound > 0.0:
-        sound_symptoms = sound_pred.get("symptoms") or {}
-        resp_sounds = sound_symptoms.get("respiratory_sounds", 0.0)
-        normal_sound = sound_symptoms.get("normal_acoustic_pattern", 0.0)
-        
-        # Respiratory sounds (coughing/gasping) can indicate Newcastle, IB, or AI
-        if resp_sounds > 0.0:
-            # Distribute based on disease relevance
-            prob_map["Newcastle"] += resp_sounds * w_sound * 0.4
-            prob_map["Infectious Bronchitis"] += resp_sounds * w_sound * 0.4
-            prob_map["Avian Influenza"] += resp_sounds * w_sound * 0.2
-            
-        if normal_sound > 0.0:
-            prob_map["Healthy"] += normal_sound * w_sound
+        sound_priors = sound_adapted.get("disease_priors") or {}
+        for key in classes:
+            prob_map[key] += float(sound_priors.get(key, 0.0)) * w_sound
 
-    # 4. Add Image Visual Symptoms Contribution
+    # 4. Add Image Visual Symptoms Contribution (Apurva ResNet-18)
     if w_image > 0.0:
-        img_symptoms = image_pred.get("symptoms") or {}
-        lethargy = img_symptoms.get("lethargy", 0.0)
-        sitting_lying = img_symptoms.get("sitting_lying", 0.0)
-        abnormal_posture = img_symptoms.get("abnormal_posture", 0.0)
-        reduced_activity = img_symptoms.get("reduced_activity", 0.0)
-        abnormal_appearance = img_symptoms.get("abnormal_appearance", 0.0)
-        scabby_lesions = img_symptoms.get("scabby_lesions", 0.0)
-        normal_vis = img_symptoms.get("normal_posture_activity", 0.0)
-        
-        # Coccidiosis: lethargy, sitting/lying, abnormal posture, reduced activity
-        cocc_vis = (sitting_lying * 0.4 + lethargy * 0.2 + abnormal_posture * 0.2 + reduced_activity * 0.2)
-        prob_map["Coccidiosis"] += cocc_vis * w_image
-        
-        # Newcastle: abnormal posture/behavior, respiratory signs
-        newc_vis = (abnormal_posture * 0.6 + lethargy * 0.4)
-        prob_map["Newcastle"] += newc_vis * w_image
-        
-        # Avian Influenza: lethargy, reduced activity, abnormal appearance
-        ai_vis = (lethargy * 0.4 + reduced_activity * 0.3 + abnormal_appearance * 0.3)
-        prob_map["Avian Influenza"] += ai_vis * w_image
-        
-        # Fowlpox: scabby/raised lesions on comb/wattles/eyelids, mouth/throat lesions
-        fowl_vis = (scabby_lesions * 0.8 + lethargy * 0.2)
-        prob_map["Fowlpox"] += fowl_vis * w_image
-        
-        if normal_vis > 0.0:
-            prob_map["Healthy"] += normal_vis * w_image
+        image_probs = image_pred.get("probabilities") or {}
+        for key in classes:
+            prob_map[key] += float(image_probs.get(key, 0.0)) * w_image
 
-    # 5. Apply Critical Environmental & Multi-Modal Overrides (Heuristics)
+    # 5. Multi-Modal Synergies & Clinical Overrides
     
-    # Ammonia (air-quality/respiratory stress feature)
-    # Ammonia >= 25.0 ppm causes severe respiratory lining burns and high susceptibility
+    # Ammonia Override (hazardous air quality induces severe respiratory mucosal damage)
     if ammonia is not None:
         nh3 = float(ammonia)
         if nh3 >= 25.0:
-            # Boost respiratory disease priors significantly
-            prob_map["Infectious Bronchitis"] = max(prob_map["Infectious Bronchitis"], 0.45)
-            prob_map["Newcastle"] = max(prob_map["Newcastle"], 0.35)
-            prob_map["Avian Influenza"] = max(prob_map["Avian Influenza"], 0.20)
-            
-            # Reduce Healthy probability
-            prob_map["Healthy"] = max(0.0, prob_map["Healthy"] - 0.60)
+            # Toxic ammonia heavily elevates Infectious Coryza respiratory vulnerability
+            prob_map["Infectious Coryza"] = max(prob_map["Infectious Coryza"], 0.55)
+            prob_map["Healthy"] = max(0.0, prob_map["Healthy"] - 0.50)
         elif nh3 >= 18.0:
-            # Moderate stress boost
-            prob_map["Infectious Bronchitis"] = max(prob_map["Infectious Bronchitis"], 0.25)
-            prob_map["Newcastle"] = max(prob_map["Newcastle"], 0.20)
-            prob_map["Healthy"] = max(0.0, prob_map["Healthy"] - 0.25)
+            prob_map["Infectious Coryza"] = max(prob_map["Infectious Coryza"], 0.30)
+            prob_map["Healthy"] = max(0.0, prob_map["Healthy"] - 0.20)
 
-    # Production/Feeding drop overrides for Fowlpox and Coccidiosis
+    # Multi-modal synergy: Visual symptoms + Acoustic coughing/gasping
+    img_symptoms = (image_pred.get("symptoms") if image_pred else {}) or {}
+    sound_symptoms = sound_adapted.get("symptoms", {})
+    resp_sounds = sound_symptoms.get("respiratory_sounds", 0.0)
+
+    # If visual model detects Infectious Coryza signs AND sound model detects coughing/gasping
+    if img_symptoms.get("facial_swelling_nasal_discharge", 0.0) > 0.4 and resp_sounds > 0.4:
+        prob_map["Infectious Coryza"] = max(prob_map["Infectious Coryza"], 0.80)
+        prob_map["Healthy"] = max(0.0, prob_map["Healthy"] - 0.50)
+
+    # If visual model detects Fowlpox scabby lesions strongly
+    if img_symptoms.get("scabby_lesions", 0.0) > 0.5:
+        prob_map["Fowlpox"] = max(prob_map["Fowlpox"], 0.75)
+        prob_map["Healthy"] = max(0.0, prob_map["Healthy"] - 0.40)
+
+    # Production/Feeding drop overrides
     if egg_drop or feed_drop:
-        # Fowlpox reduces activity, feeding, and egg production
-        prob_map["Fowlpox"] = max(prob_map["Fowlpox"], 0.35 if egg_drop and feed_drop else 0.20)
-        # Coccidiosis reduces feeding/activity
-        if feed_drop:
-            prob_map["Coccidiosis"] = max(prob_map["Coccidiosis"], 0.30)
+        # Fowlpox and Coryza both cause significant anorexia and egg drops
+        prob_map["Fowlpox"] = max(prob_map["Fowlpox"], 0.25 if egg_drop and feed_drop else 0.15)
+        prob_map["Infectious Coryza"] = max(prob_map["Infectious Coryza"], 0.30 if feed_drop else 0.15)
 
-    # Multi-modal Newcastle specific indicator: abnormal posture (image) + coughing/gasping (sound)
-    if (image_pred and image_pred.get("prediction") in ["Lethargic", "Huddling"] 
-        and sound_pred and sound_pred.get("prediction") == "Sick"):
-        # Very high confidence indicator of Newcastle/Avian Influenza
-        prob_map["Newcastle"] = max(prob_map["Newcastle"], 0.70)
-        prob_map["Avian Influenza"] = max(prob_map["Avian Influenza"], 0.25)
-
-    # Apply Mortality adjustments
+    # Mortality adjustments
     if recent_deaths > 0:
-        # Reduce Healthy probability as mortality is a counter-indicator
-        prob_map["Healthy"] = max(0.0, prob_map["Healthy"] - (0.2 * recent_deaths))
-        # Boost specific diseases depending on the intensity of deaths
-        if recent_deaths >= 10:
-            prob_map["Avian Influenza"] = max(prob_map["Avian Influenza"], 0.45)
-            prob_map["Newcastle"] = max(prob_map["Newcastle"], 0.35)
-        elif recent_deaths >= 5:
-            prob_map["Avian Influenza"] = max(prob_map["Avian Influenza"], 0.30)
-            prob_map["Newcastle"] = max(prob_map["Newcastle"], 0.25)
-            prob_map["Infectious Bronchitis"] = max(prob_map["Infectious Bronchitis"], 0.20)
+        prob_map["Healthy"] = max(0.0, prob_map["Healthy"] - (0.15 * recent_deaths))
+        if recent_deaths >= 5:
+            prob_map["Infectious Coryza"] = max(prob_map["Infectious Coryza"], 0.45)
+            prob_map["Fowlpox"] = max(prob_map["Fowlpox"], 0.35)
         else:
-            prob_map["Coccidiosis"] = max(prob_map["Coccidiosis"], 0.15)
-            prob_map["Infectious Bronchitis"] = max(prob_map["Infectious Bronchitis"], 0.15)
+            prob_map["Infectious Coryza"] = max(prob_map["Infectious Coryza"], 0.25)
 
-    # Normalize probabilities to sum to 1.0
+    # Re-normalize probabilities strictly to sum to 1.0
     total_prob = sum(prob_map.values())
     if total_prob > 0.0:
         prob_map = {k: v / total_prob for k, v in prob_map.items()}
@@ -165,12 +125,23 @@ def fuse_decisions(temp, hum, ammonia, sensor_pred, sound_pred, image_pred, egg_
 
     # 6. Select final decision
     fused_disease = max(prob_map, key=prob_map.get)
-    confidence = prob_map[fused_disease]
+    confidence = float(prob_map[fused_disease])
     
-    return fused_disease, float(confidence), prob_map
+    return fused_disease, confidence, prob_map
 
 
-def fuse_and_store(device_id, telemetry_id, temp, hum, ammonia, sound_level, sensor_pred, sound_pred, image_pred, farm_id="default_farm"):
+def fuse_and_store(
+    device_id: str,
+    telemetry_id: Optional[str],
+    temp: Optional[float],
+    hum: Optional[float],
+    ammonia: Optional[float],
+    sound_level: Optional[float],
+    sensor_pred: Optional[Dict[str, Any]],
+    sound_pred: Optional[Dict[str, Any]],
+    image_pred: Optional[Dict[str, Any]],
+    farm_id: str = "default_farm",
+) -> Dict[str, Any]:
     """
     Fuses predictions from all modalities, calculates risk levels,
     generates biosecurity recommendations, and stores the results to Supabase.
@@ -184,8 +155,16 @@ def fuse_and_store(device_id, telemetry_id, temp, hum, ammonia, sound_level, sen
         mort_records = get_mortality_records(batch_id)
         recent_deaths = sum(int(r.get("death_count", 0) or r.get("deathCount", 0)) for r in mort_records)
 
-    # Run weighted fusion
-    fused_disease, confidence, prob_map = fuse_decisions(temp, hum, ammonia, sensor_pred, sound_pred, image_pred, recent_deaths=recent_deaths)
+    # Run weighted multi-modal fusion
+    fused_disease, confidence, prob_map = fuse_decisions(
+        temp=temp,
+        hum=hum,
+        ammonia=ammonia,
+        sensor_pred=sensor_pred,
+        sound_pred=sound_pred,
+        image_pred=image_pred,
+        recent_deaths=recent_deaths,
+    )
     
     # 1. Determine risk level
     if fused_disease == "Healthy":
@@ -195,7 +174,7 @@ def fuse_and_store(device_id, telemetry_id, temp, hum, ammonia, sound_level, sen
     else:
         risk_level = "MEDIUM"
         
-    # Double check ammonia risk overrides
+    # Ammonia hazard override
     if ammonia is not None and float(ammonia) >= 25.0:
         risk_level = "HIGH"
         
@@ -205,39 +184,23 @@ def fuse_and_store(device_id, telemetry_id, temp, hum, ammonia, sound_level, sen
             f"CRITICAL AMMONIA ALERT: Air quality is hazardous ({ammonia} ppm). "
             "Exhaust ventilation fans must run at 100% capacity to flush the house and prevent permanent respiratory tract burns."
         )
-    elif fused_disease == "Newcastle":
+    elif fused_disease == "Infectious Coryza":
         recommendation = (
-            f"NEWCASTLE DISEASE WARNING: High risk of Newcastle infection ({int(confidence * 100)}% confidence). "
-            "Acoustic/visual metrics show gasping and abnormal posture. Quarantine affected birds and contact your vet immediately."
-        )
-    elif fused_disease == "Avian Influenza":
-        recommendation = (
-            f"AVIAN INFLUENZA WARNING: High risk of Avian Influenza ({int(confidence * 100)}% confidence). "
-            "Visual monitors show extreme lethargy and abnormal appearance. Alert biosecurity officers and isolate the flock."
-        )
-    elif fused_disease == "Coccidiosis":
-        recommendation = (
-            f"COCCIDIOSIS DETECTED: Elevated risk of digestive infection ({int(confidence * 100)}% confidence). "
-            "Visual cues show huddling/lying. Ensure composted litter is dry, feed is dry, and treat with coccidiostats."
+            f"INFECTIOUS CORYZA ALERT: Elevated risk of acute respiratory bacterial infection ({int(confidence * 100)}% confidence). "
+            "Acoustic gasping/rales and facial swelling detected. Consult flock veterinarian for antimicrobial therapy, separate symptomatic birds, and sanitize water lines."
         )
     elif fused_disease == "Fowlpox":
         recommendation = (
-            f"FOWLPOX ALERT: High risk of Fowlpox infection ({int(confidence * 100)}% confidence). "
-            "Visual check reveals possible comb/wattle lesions. Isolate symptomatic birds, control mosquitos, and apply antiseptic."
-        )
-    elif fused_disease == "Infectious Bronchitis":
-        recommendation = (
-            f"INFECTIOUS BRONCHITIS ALERT: High risk of IB respiratory infection ({int(confidence * 100)}% confidence). "
-            "Detected heavy coughing/gasping. Stabilize shed temperature and mist disinfectant to suppress aerosol transmission."
+            f"FOWLPOX ALERT: High risk of viral Fowlpox infection ({int(confidence * 100)}% confidence). "
+            "Visual cues show possible cutaneous/diphtheritic lesions on unfeathered skin. Isolate symptomatic birds, implement mosquito vector control, and apply topical antiseptics."
         )
     else:
-        # Healthy
         recommendation = (
-            "LOW DISEASE RISK: Environment parameters (Temp, Humidity, Ammonia) and flock behavior "
-            "(sound, visual movement) are all within ideal comfort zones."
+            "LOW DISEASE RISK: Environment parameters (Temp, Humidity, Ammonia), flock vocalizations, "
+            "and visual activity are within stable comfort ranges."
         )
 
-    # 3. Store result to Supabase database (saving the specific disease string directly)
+    # 3. Store result to Supabase database
     db_res = save_prediction(
         device_id=device_id,
         disease=fused_disease,
@@ -245,7 +208,7 @@ def fuse_and_store(device_id, telemetry_id, temp, hum, ammonia, sound_level, sen
         confidence=confidence,
         recommendation=recommendation,
         telemetry_id=telemetry_id,
-        farm_id=farm_id
+        farm_id=farm_id,
     )
     
     return {
@@ -254,5 +217,5 @@ def fuse_and_store(device_id, telemetry_id, temp, hum, ammonia, sound_level, sen
         "confidence": confidence,
         "recommendation": recommendation,
         "db_status": db_res.get("status", "fallback"),
-        "probabilities": prob_map
+        "probabilities": prob_map,
     }

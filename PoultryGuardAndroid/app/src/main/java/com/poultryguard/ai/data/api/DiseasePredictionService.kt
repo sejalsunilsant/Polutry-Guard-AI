@@ -58,18 +58,18 @@ enum class DiseaseRiskLevel {
 }
 
 interface DiseasePredictionApi {
-    @POST("api/v1/predict-disease")
+    @POST("predict-disease")
     suspend fun predictDisease(@Body request: DiseasePredictionRequest): DiseasePredictionResponse
 
-    @GET("api/v1/predictions/latest")
+    @GET("predictions/latest")
     suspend fun getLatestPrediction(@Query("deviceId") deviceId: String): DiseasePredictionResponse
 
     @Multipart
-    @POST("api/v1/predict-sound")
+    @POST("predict-sound")
     suspend fun predictSound(@Part file: MultipartBody.Part): SoundPredictionResponse
 
     @Multipart
-    @POST("api/v1/guardian/predict")
+    @POST("guardian/predict")
     suspend fun predictGuardian(
         @Part("deviceId") deviceId: RequestBody,
         @Part("farmId") farmId: RequestBody,

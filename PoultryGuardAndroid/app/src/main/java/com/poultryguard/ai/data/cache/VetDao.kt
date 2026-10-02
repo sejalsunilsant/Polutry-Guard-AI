@@ -24,6 +24,9 @@ interface VetDao {
     @Query("SELECT COUNT(*) FROM veterinarians")
     suspend fun getCount(): Int
 
+    @Query("SELECT COUNT(*) FROM veterinarians WHERE verificationStatus = 'VERIFIED'")
+    suspend fun getVerifiedCount(): Int
+
     @Query("SELECT * FROM veterinarians WHERE email = :email LIMIT 1")
     suspend fun getVetByEmail(email: String): Veterinarian?
 

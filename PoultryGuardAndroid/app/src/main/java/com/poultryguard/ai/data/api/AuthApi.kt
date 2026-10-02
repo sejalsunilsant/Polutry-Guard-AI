@@ -65,8 +65,15 @@ data class FarmMemberDto(
 data class FarmDto(
     @SerializedName("name") val name: String,
     @SerializedName("latitude") val latitude: Double? = null,
-    @SerializedName("longitude") val longitude: Double? = null
+    @SerializedName("longitude") val longitude: Double? = null,
+    @SerializedName("batches") val batches: List<BatchDto>? = null
 )
+
+data class BatchDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("status") val status: String
+)
+
 
 data class ReviewFarmerRequest(
     @SerializedName("profileId") val profileId: String,
@@ -120,8 +127,8 @@ data class UserContextDto(
     @SerializedName("farmName") val farmName: String?,
     @SerializedName("deviceId") val deviceId: String?,
     @SerializedName("deviceName") val deviceName: String?,
-    @SerializedName("thingspeakChannelId") val thingspeakChannelId: String?,
-    @SerializedName("thingspeakReadApiKey") val thingspeakReadApiKey: String?,
+    @SerializedName("thingspeakChannelId") val thingspeakChannelId: String? = null,
+    @SerializedName("thingspeakReadApiKey") val thingspeakReadApiKey: String? = null,
     @SerializedName("wifiSsid") val wifiSsid: String?,
     @SerializedName("phone") val phone: String? = null,
     @SerializedName("location") val location: String? = null,
@@ -137,9 +144,7 @@ data class UserContextDto(
 // ── Kit Management DTOs ─────────────────────────────────────────────────────
 
 /**
- * Request body for POST /api/v1/admin/kits.
- * The thingspeakWriteApiKey is sent to the backend but NEVER stored in any
- * client-side model — it stays server-side only.
+ * Request body for POST /admin/kits.
  */
 data class CreateKitRequest(
     @SerializedName("deviceId") val deviceId: String,
@@ -153,7 +158,7 @@ data class CreateKitRequest(
 )
 
 /**
- * Request body for POST /api/v1/admin/kits/assign.
+ * Request body for POST /admin/kits/assign.
  * The backend resolves farm_id from farm_members — Android must never pass farm_id directly.
  */
 data class AssignKitRequest(
@@ -167,9 +172,16 @@ data class KitDto(
     @SerializedName("name") val name: String?,
     @SerializedName("kit_id") val kitId: String?,
     @SerializedName("farm_id") val farmId: String?,
-    @SerializedName("thingspeak_channel_id") val thingspeakChannelId: String?,
-    @SerializedName("last_seen_at") val lastSeenAt: String?,
-    @SerializedName("created_at") val createdAt: String?
+    @SerializedName("farm_name") val farmName: String? = null,
+    @SerializedName("farmer_id") val farmerId: String? = null,
+    @SerializedName("farmer_name") val farmerName: String? = null,
+    @SerializedName("serial_number") val serialNumber: String? = null,
+    @SerializedName("firmware_version") val firmwareVersion: String? = null,
+    @SerializedName("thingspeak_channel_id") val thingspeakChannelId: String? = null,
+    @SerializedName("thingspeak_read_api_key") val thingspeakReadApiKey: String? = null,
+    @SerializedName("lifecycle_status") val lifecycleStatus: String? = null,
+    @SerializedName("last_seen_at") val lastSeenAt: String? = null,
+    @SerializedName("created_at") val createdAt: String? = null
 )
 
 /** Generic single-kit response envelope. */
@@ -179,7 +191,7 @@ data class KitApiResponse(
     @SerializedName("data") val data: KitDto?
 )
 
-/** List-kits response envelope (GET /api/v1/admin/kits). */
+/** List-kits response envelope (GET /admin/kits). */
 data class KitListApiResponse(
     @SerializedName("status") val status: String,
     @SerializedName("message") val message: String?,
@@ -189,63 +201,106 @@ data class KitListApiResponse(
 // ────────────────────────────────────────────────────────────────────────────
 
 interface AuthApi {
-    @POST("api/v1/auth/register")
+    @POST("auth/register")
     suspend fun register(
         @Body body: RegisterRequest
     ): AuthApiResponse
 
-    @POST("api/v1/auth/login")
+    @POST("auth/login")
     suspend fun login(
         @Body body: LoginRequest
     ): AuthApiResponse
 
-    @POST("api/v1/auth/forgot-password")
+    @POST("auth/forgot-password")
     suspend fun forgotPassword(
         @Body body: ForgotPasswordRequest
     ): AuthApiResponse
 
-    @retrofit2.http.GET("api/v1/admin/pending-farmers")
+    @retrofit2.http.GET("admin/pending-farmers")
     suspend fun getPendingFarmers(): PendingFarmersResponse
 
-    @POST("api/v1/admin/review-farmer")
+    @POST("admin/review-farmer")
     suspend fun reviewFarmer(
         @Body body: ReviewFarmerRequest
     ): ReviewFarmerResponse
 
-    @retrofit2.http.GET("api/v1/admin/farmers")
+    @retrofit2.http.GET("admin/farmers")
     suspend fun getAllFarmers(): FarmersResponse
 
-    @retrofit2.http.GET("api/v1/veterinarians")
+    @retrofit2.http.GET("veterinarians")
     suspend fun getAllVeterinarians(): VeterinariansResponse
 
-    @retrofit2.http.GET("api/v1/users/{profile_id}/context")
+    @retrofit2.http.GET("users/{profile_id}/context")
     suspend fun getUserContext(
         @retrofit2.http.Path("profile_id") profileId: String
     ): UserContextResponse
 
     /** Register a new IoT device kit (farm_id intentionally NULL at creation). */
-    @POST("api/v1/admin/kits")
+    @POST("admin/kits")
     suspend fun createKit(
         @Body body: CreateKitRequest
     ): KitApiResponse
 
     /** Assign an existing kit to a farmer's farm. Backend resolves farm_id. */
-    @POST("api/v1/admin/kits/assign")
+    @POST("admin/kits/assign")
     suspend fun assignKit(
         @Body body: AssignKitRequest
     ): KitApiResponse
 
     /** Fetch all registered device kits (excludes write API key). */
-    @retrofit2.http.GET("api/v1/admin/kits")
+    @retrofit2.http.GET("admin/kits")
     suspend fun listKits(): KitListApiResponse
 
     /** Configure Wi-Fi credentials for a device kit. */
-    @POST("api/v1/device/configure-wifi")
+    @POST("device/configure-wifi")
     suspend fun configureWifi(
         @retrofit2.http.Header("Authorization") token: String,
         @Body body: ConfigureWifiRequest
     ): ConfigureWifiResponse
+
+    @retrofit2.http.GET("health-alerts")
+    suspend fun getAlerts(
+        @retrofit2.http.Query("batch_id") batchId: String? = null
+    ): AlertsApiResponse
+
+    @POST("health-alerts")
+    suspend fun createAlert(
+        @Body body: CreateAlertRequest
+    ): AlertApiResponse
+
+    @retrofit2.http.PUT("health-alerts/{alert_id}")
+    suspend fun updateAlertStatus(
+        @retrofit2.http.Path("alert_id") alertId: String,
+        @Body body: UpdateAlertStatusRequest
+    ): SimpleApiResponse
+
+    @retrofit2.http.GET("veterinary-consultations")
+    suspend fun getCases(
+        @retrofit2.http.Query("vet_id") vetId: String? = null,
+        @retrofit2.http.Query("batch_id") batchId: String? = null
+    ): CasesApiResponse
+
+    @POST("veterinary-consultations")
+    suspend fun createCase(
+        @Body body: CreateCaseRequest
+    ): CaseApiResponse
+
+    @retrofit2.http.PUT("veterinary-consultations/{case_id}")
+    suspend fun updateCase(
+        @retrofit2.http.Path("case_id") caseId: String,
+        @Body body: UpdateCaseRequest
+    ): SimpleApiResponse
+
+    @POST("users/fcm-token")
+    suspend fun updateFcmToken(
+        @Body body: UpdateFcmTokenRequest
+    ): SimpleApiResponse
 }
+
+data class UpdateFcmTokenRequest(
+    @SerializedName("profileId") val profileId: String,
+    @SerializedName("fcmToken") val fcmToken: String
+)
 
 data class ConfigureWifiRequest(
     @SerializedName("deviceId") val deviceId: String,
@@ -257,5 +312,88 @@ data class ConfigureWifiResponse(
     @SerializedName("status") val status: String,
     @SerializedName("message") val message: String
 )
+
+data class CreateAlertRequest(
+    @SerializedName("batchId") val batchId: String,
+    @SerializedName("deviceId") val deviceId: String,
+    @SerializedName("predictionId") val predictionId: Long,
+    @SerializedName("title") val title: String,
+    @SerializedName("description") val description: String,
+    @SerializedName("severity") val severity: String
+)
+
+data class UpdateAlertStatusRequest(
+    @SerializedName("status") val status: String
+)
+
+data class AlertsApiResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("data") val data: List<AlertDto>?
+)
+
+data class AlertApiResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("data") val data: AlertDto?
+)
+
+data class AlertDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("batch_id") val batchId: String,
+    @SerializedName("device_id") val deviceId: String,
+    @SerializedName("prediction_id") val predictionId: Long,
+    @SerializedName("title") val title: String,
+    @SerializedName("description") val description: String,
+    @SerializedName("severity") val severity: String,
+    @SerializedName("status") val status: String,
+    @SerializedName("created_at") val createdAt: String? = null
+)
+
+data class CreateCaseRequest(
+    @SerializedName("alertId") val alertId: String?,
+    @SerializedName("batchId") val batchId: String,
+    @SerializedName("veterinarianId") val veterinarianId: String?,
+    @SerializedName("status") val status: String
+)
+
+data class UpdateCaseRequest(
+    @SerializedName("veterinarianId") val veterinarianId: String?,
+    @SerializedName("status") val status: String,
+    @SerializedName("diagnosis") val diagnosis: String?,
+    @SerializedName("recommendation") val recommendation: String?,
+    @SerializedName("treatment") val treatment: String?,
+    @SerializedName("followUpInstructions") val followUpInstructions: String?
+)
+
+data class CasesApiResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("data") val data: List<CaseDto>?
+)
+
+data class CaseApiResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("data") val data: CaseDto?
+)
+
+data class CaseDto(
+    @SerializedName("id") val id: String,
+    @SerializedName("alert_id") val alertId: String?,
+    @SerializedName("batch_id") val batchId: String,
+    @SerializedName("veterinarian_id") val veterinarianId: String?,
+    @SerializedName("status") val status: String,
+    @SerializedName("diagnosis") val diagnosis: String?,
+    @SerializedName("recommendation") val recommendation: String?,
+    @SerializedName("treatment") val treatment: String?,
+    @SerializedName("followUpInstructions") val followUpInstructions: String?,
+    @SerializedName("created_at") val createdAt: String? = null,
+    @SerializedName("updated_at") val updatedAt: String? = null
+)
+
+data class SimpleApiResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("message") val message: String?
+)
+
+
+
 
 

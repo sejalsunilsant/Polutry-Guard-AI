@@ -19,6 +19,9 @@ interface AlertDao {
     @Query("SELECT * FROM alerts WHERE batchId = :batchId ORDER BY createdAt DESC")
     suspend fun getAlertsForBatch(batchId: String): List<Alert>
 
+    @Query("SELECT * FROM alerts WHERE batchId = :batchId ORDER BY createdAt DESC")
+    fun getAlertsForBatchFlow(batchId: String): Flow<List<Alert>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(alert: Alert)
 
@@ -27,4 +30,10 @@ interface AlertDao {
 
     @Query("UPDATE alerts SET status = :status WHERE id = :id")
     suspend fun updateStatus(id: String, status: String)
+
+    @Query("DELETE FROM alerts WHERE batchId = :batchId")
+    suspend fun deleteAlertsForBatch(batchId: String)
+
+    @Query("DELETE FROM alerts")
+    suspend fun deleteAll()
 }

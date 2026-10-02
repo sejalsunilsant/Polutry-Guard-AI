@@ -12,7 +12,7 @@ import com.poultryguard.ai.data.model.SupportTicket
 import com.poultryguard.ai.data.model.Alert
 import com.poultryguard.ai.data.model.VeterinaryCase
 
-@Database(entities = [MortalityRecord::class, Veterinarian::class, SystemStats::class, FarmerProfile::class, SupportTicket::class, Alert::class, VeterinaryCase::class, com.poultryguard.ai.data.model.Consultation::class], version = 14, exportSchema = false)
+@Database(entities = [MortalityRecord::class, Veterinarian::class, SystemStats::class, FarmerProfile::class, SupportTicket::class, Alert::class, VeterinaryCase::class, com.poultryguard.ai.data.model.Consultation::class], version = 15, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun mortalityDao(): MortalityDao

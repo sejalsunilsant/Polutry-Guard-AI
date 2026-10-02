@@ -71,10 +71,15 @@ class VetRepository(private val context: Context) {
 
     suspend fun syncVeterinarians(): Result<Unit> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
-            val api = getApi() ?: throw Exception("API not initialized.")
+            val api = getApi()
+            if (api == null) {
+                return@withContext Result.failure(Exception("API not initialized."))
+            }
+            android.util.Log.d("VetRepo", "syncVeterinarians: calling API getAllVeterinarians...")
             val response = api.getAllVeterinarians()
             if (response.status == "success" && response.data != null) {
-                val vets = response.data.map { dto ->
+                val data = response.data
+                val vets = data.map { dto ->
                     Veterinarian(
                         id = dto.id,
                         name = dto.name,
@@ -93,12 +98,17 @@ class VetRepository(private val context: Context) {
                     )
                 }
                 vetDao.deleteAll()
-                vetDao.insertAll(vets)
+                if (vets.isNotEmpty()) {
+                    vetDao.insertAll(vets)
+                }
+                val verifiedAfterSync = vetDao.getVerifiedCount()
+                android.util.Log.d("VetRepo", "syncVeterinarians: SUCCESS. Inserted ${vets.size} vets. Verified count in DB=$verifiedAfterSync")
                 Result.success(Unit)
             } else {
                 Result.failure(Exception("Failed to fetch veterinarians from backend."))
             }
         } catch (e: Exception) {
+            android.util.Log.e("VetRepo", "syncVeterinarians: EXCEPTION: ${e.message}", e)
             Result.failure(e)
         }
     }

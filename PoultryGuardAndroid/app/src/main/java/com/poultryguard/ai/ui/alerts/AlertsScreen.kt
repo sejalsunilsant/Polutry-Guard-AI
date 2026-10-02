@@ -94,7 +94,8 @@ fun AlertsScreen(
     var consultations by remember { mutableStateOf<List<com.poultryguard.ai.data.model.Consultation>>(emptyList()) }
 
     val cachedUser = remember { cacheManager.getCachedUserProfile() }
-    val farmerId = cachedUser?.uid ?: "farmer_mock_1"
+    val farmerId = cachedUser?.uid ?: ""
+    val activeBatchId = (uiState as? DashboardUiState.Success)?.activeBatch?.id ?: ""
 
     LaunchedEffect(Unit) {
         cachedEvents = cacheManager.getCachedFarmEvents()
@@ -109,19 +110,37 @@ fun AlertsScreen(
             mortalityRecords = records
         }
     }
-    LaunchedEffect(Unit) {
-        caseRepository.getAllCasesFlow().collect { cases ->
-            veterinaryCases = cases
+    LaunchedEffect(activeBatchId) {
+        if (activeBatchId.isNotEmpty()) {
+            caseRepository.syncAlerts(activeBatchId)
+            caseRepository.syncCases(batchId = activeBatchId)
         }
     }
-    LaunchedEffect(Unit) {
-        caseRepository.getAllAlertsFlow().collect { list ->
-            alerts = list
+    LaunchedEffect(activeBatchId) {
+        if (activeBatchId.isNotEmpty()) {
+            caseRepository.getCasesForBatchFlow(activeBatchId).collect { cases ->
+                veterinaryCases = cases
+            }
+        } else {
+            veterinaryCases = emptyList()
+        }
+    }
+    LaunchedEffect(activeBatchId) {
+        if (activeBatchId.isNotEmpty()) {
+            caseRepository.getAlertsForBatchFlow(activeBatchId).collect { list ->
+                alerts = list
+            }
+        } else {
+            alerts = emptyList()
         }
     }
     LaunchedEffect(farmerId) {
-        caseRepository.getConsultationsForFarmerFlow(farmerId).collect { consults ->
-            consultations = consults
+        if (farmerId.isNotEmpty()) {
+            caseRepository.getConsultationsForFarmerFlow(farmerId).collect { consults ->
+                consultations = consults
+            }
+        } else {
+            consultations = emptyList()
         }
     }
 
@@ -130,18 +149,6 @@ fun AlertsScreen(
     ) { isGranted ->
         // Permission result handled gracefully
     }
-
-    // Analytics Mock Datasets
-    val healthRates = listOf(100f, 99.98f, 99.96f, 99.94f, 99.92f, 99.88f, 99.88f)
-    val scatterPoints = listOf(
-        Pair(24.2f, 12.0f),
-        Pair(25.5f, 14.5f),
-        Pair(27.8f, 19.0f),
-        Pair(29.5f, 22.0f), // Danger Zone
-        Pair(31.0f, 25.5f), // Critical Danger Zone
-        Pair(23.5f, 11.0f),
-        Pair(24.0f, 12.2f)
-    )
 
     var generatedReportText by remember { mutableStateOf<String?>(null) }
     var showReportDialog by remember { mutableStateOf(false) }

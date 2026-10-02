@@ -80,6 +80,8 @@ class SupabaseProxy:
 supabase = SupabaseProxy()
 _mock_batches = {}
 _mock_mortality = []
+_mock_alerts = []
+_mock_cases = []
 _mock_veterinarians = {
     "vet_1": {
         "id": "vet_1",
@@ -248,9 +250,22 @@ def save_telemetry(device_id, temperature, humidity, ammonia, sound_level, farm_
             data["created_at"] = created_at
             
         active_batch = get_active_batch(farm_id)
-        if active_batch:
-            data["batch_id"] = active_batch.get("id")
+        batch_id = active_batch.get("id") if active_batch else None
+        if batch_id:
+            data["batch_id"] = batch_id
         res = supabase.table("sensor_telemetry").insert(data).execute()
+        
+        # Check environmental thresholds & trigger FCM notifications with cooldown/reset
+        check_telemetry_thresholds_and_notify(
+            device_id=device_id,
+            temperature=temperature,
+            humidity=humidity,
+            ammonia=ammonia,
+            sound_level=sound_level,
+            farm_id=farm_id,
+            batch_id=batch_id
+        )
+        
         return {"status": "success", "data": res.data}
     except Exception as e:
         print(f"[Supabase Error] Failed to log telemetry: {e}")
@@ -328,12 +343,9 @@ def update_settings(device_id, settings_dict, farm_id):
         return {"status": "success", "data": res.data}
     except Exception as e:
         print(f"[Supabase Error] Failed to update settings for device '{device_id}': {e}")
-        return {"status": "error", "message": str(e)}
-
-
 def get_device_thingspeak_config(device_id):
     """
-    Fetches the ThingSpeak channel ID and read API key for a device.
+    Fetch ThingSpeak credentials for a device from Supabase.
     """
     if not supabase:
         return {"status": "fallback", "thingspeak_channel_id": None, "thingspeak_read_api_key": None, "farm_id": None}
@@ -347,34 +359,27 @@ def get_device_thingspeak_config(device_id):
                 "thingspeak_read_api_key": device.get("thingspeak_read_api_key"),
                 "farm_id": device.get("farm_id")
             }
-        return {"status": "error", "message": "Device not found"}
+        return {"status": "error", "message": f"Device '{device_id}' not found"}
     except Exception as e:
-        print(f"[Supabase Error] Failed to get device config: {e}")
+        print(f"[Supabase Error] Failed to fetch ThingSpeak config for device '{device_id}': {e}")
         return {"status": "error", "message": str(e)}
-
 
 def update_device_thingspeak_config(device_id, farm_id, channel_id, read_api_key):
     """
-    Updates the ThingSpeak credentials for a device after verifying it belongs to the given farm (or registers it).
+    Update or initialize ThingSpeak channel and read key for a device.
     """
     if not supabase:
-        print(f"[Supabase Fallback] Settings updated in local fallback state for device '{device_id}'.")
-        return {"status": "fallback"}
+        print(f"[Supabase Fallback] ThingSpeak config updated in fallback state for device '{device_id}'.")
+        return {"status": "fallback", "data": {"thingspeak_channel_id": channel_id}}
     try:
         ensure_device_exists(device_id, farm_id)
-        
-        # Verify ownership
-        verify_res = supabase.table("devices").select("farm_id").eq("id", device_id).execute()
-        if verify_res.data and verify_res.data[0].get("farm_id") != farm_id:
-            return {"status": "error", "message": "Unauthorized: Device belongs to a different farm"}
-            
         res = supabase.table("devices").update({
             "thingspeak_channel_id": channel_id,
             "thingspeak_read_api_key": read_api_key
         }).eq("id", device_id).execute()
         return {"status": "success", "data": res.data}
     except Exception as e:
-        print(f"[Supabase Error] Failed to update device config: {e}")
+        print(f"[Supabase Error] Failed to update ThingSpeak config for device '{device_id}': {e}")
         return {"status": "error", "message": str(e)}
 
 
@@ -1387,12 +1392,245 @@ def update_disease_event(event, new_confidence, new_image_url=None, new_sound_ur
         return None
 
 
+# Mock FCM token cache for offline/testing mode
+_mock_fcm_tokens = {}
+
+def update_user_fcm_token(profile_id: str, fcm_token: str) -> bool:
+    """
+    Update or store a user's (Farmer/Veterinarian) FCM device token in Supabase profiles.
+    """
+    if not profile_id or not fcm_token:
+        return False
+    _mock_fcm_tokens[str(profile_id)] = fcm_token
+    if not supabase:
+        print(f"[Supabase Fallback] Cached FCM token locally for profile '{profile_id}'.")
+        return True
+    try:
+        supabase.table("profiles").update({"fcm_token": fcm_token}).eq("id", str(profile_id)).execute()
+        return True
+    except Exception as e:
+        print(f"[Supabase Error] update_user_fcm_token failed: {e}")
+        return False
+
+
+def remove_invalid_fcm_tokens(invalid_tokens: list):
+    """
+    Cleans up expired or unregistered FCM device tokens from profiles table.
+    """
+    if not invalid_tokens:
+        return
+    for t in invalid_tokens:
+        for k, v in list(_mock_fcm_tokens.items()):
+            if v == t:
+                _mock_fcm_tokens.pop(k, None)
+    if not supabase:
+        return
+    try:
+        for t in invalid_tokens:
+            supabase.table("profiles").update({"fcm_token": None}).eq("fcm_token", t).execute()
+    except Exception as e:
+        print(f"[Supabase Error] remove_invalid_fcm_tokens failed: {e}")
+
+
+def get_farm_fcm_tokens(farm_id: str) -> list:
+    """
+    Fetches all active FCM device tokens for farmers, managers, and assigned vets for a farm.
+    """
+    tokens = []
+    # Check mock token cache first
+    for tok in _mock_fcm_tokens.values():
+        if tok and tok not in tokens:
+            tokens.append(tok)
+
+    if not supabase or not farm_id:
+        return tokens
+
+    try:
+        # 1. Fetch profile_ids from farm_members for this farm
+        members_res = supabase.table("farm_members").select("profile_id").eq("farm_id", farm_id).execute()
+        profile_ids = [m["profile_id"] for m in (members_res.data or []) if m.get("profile_id")]
+
+        if profile_ids:
+            prof_res = supabase.table("profiles").select("fcm_token").in_("id", profile_ids).execute()
+            for row in (prof_res.data or []):
+                tok = row.get("fcm_token")
+                if tok and tok.strip() and tok not in tokens:
+                    tokens.append(tok.strip())
+
+        # 2. If no tokens found on farm_members, fallback to any active profile tokens
+        if not tokens:
+            admin_res = supabase.table("profiles").select("fcm_token").execute()
+            for row in (admin_res.data or []):
+                tok = row.get("fcm_token")
+                if tok and tok.strip() and tok not in tokens:
+                    tokens.append(tok.strip())
+
+        return tokens
+    except Exception as e:
+        print(f"[Supabase Error] get_farm_fcm_tokens failed: {e}")
+        return tokens
+
+
+def _dispatch_fcm_for_alert(batch_id, device_id, title, description, severity):
+    """
+    Helper to resolve farm info and trigger FCM push notification for an alert.
+    """
+    try:
+        from services.fcm_service import FCMService
+        farm_id = "default_farm"
+        farm_name = "Poultry Farm"
+
+        if supabase:
+            if batch_id:
+                b_res = supabase.table("batches").select("farm_id").eq("id", str(batch_id)).execute()
+                if b_res.data and len(b_res.data) > 0:
+                    farm_id = b_res.data[0].get("farm_id", farm_id)
+            elif device_id:
+                d_res = supabase.table("devices").select("farm_id").eq("id", str(device_id)).execute()
+                if d_res.data and len(d_res.data) > 0:
+                    farm_id = d_res.data[0].get("farm_id", farm_id)
+
+            f_res = supabase.table("farms").select("name").eq("id", str(farm_id)).execute()
+            if f_res.data and len(f_res.data) > 0:
+                farm_name = f_res.data[0].get("name", farm_name)
+
+        # Categorize alert type from title
+        alert_type = "DISEASE"
+        title_lower = (title or "").lower()
+        if "ammonia" in title_lower:
+            alert_type = "AMMONIA"
+        elif "heat" in title_lower or "temp" in title_lower:
+            alert_type = "TEMPERATURE"
+        elif "humid" in title_lower:
+            alert_type = "HUMIDITY"
+        elif "sound" in title_lower or "noise" in title_lower or "vocal" in title_lower:
+            alert_type = "SOUND"
+
+        FCMService.send_alert_to_farm(
+            farm_id=farm_id,
+            farm_name=farm_name,
+            alert_type=alert_type,
+            severity=severity or "HIGH",
+            title=title or f"{alert_type} Alert",
+            message=description or "Action required in poultry house.",
+            device_id=device_id,
+            batch_id=batch_id
+        )
+    except Exception as ex:
+        print(f"[Supabase FCM Dispatch Warning] {ex}")
+
+
+def check_telemetry_thresholds_and_notify(device_id, temperature, humidity, ammonia, sound_level, farm_id=None, batch_id=None):
+    """
+    Checks environmental telemetry against alert thresholds and dispatches FCM notifications with cooldown.
+    Resets alert state when metrics return to normal baseline.
+    """
+    try:
+        from services.fcm_service import FCMService, cooldown_tracker
+        farm_id = farm_id or "default_farm"
+        farm_name = "Poultry Farm"
+        if supabase:
+            try:
+                f_res = supabase.table("farms").select("name").eq("id", str(farm_id)).execute()
+                if f_res.data and len(f_res.data) > 0:
+                    farm_name = f_res.data[0].get("name", farm_name)
+            except Exception:
+                pass
+
+        # 1. Ammonia Threshold
+        if ammonia is not None:
+            nh3 = float(ammonia)
+            if nh3 >= 25.0:
+                FCMService.send_alert_to_farm(
+                    farm_id=farm_id,
+                    farm_name=farm_name,
+                    alert_type="AMMONIA",
+                    severity="CRITICAL",
+                    title="Critical Ammonia Hazard",
+                    message=f"Hazardous ammonia detected ({nh3:.1f} ppm, >25 ppm safe threshold). Turn exhaust fans to 100% immediately.",
+                    device_id=device_id,
+                    batch_id=batch_id,
+                    current_value=nh3
+                )
+            elif nh3 < 20.0:
+                cooldown_tracker.reset_alert(farm_id, device_id, "AMMONIA")
+
+        # 2. Temperature (Heat Stress) Threshold
+        if temperature is not None:
+            temp = float(temperature)
+            if temp >= 35.0:
+                FCMService.send_alert_to_farm(
+                    farm_id=farm_id,
+                    farm_name=farm_name,
+                    alert_type="TEMPERATURE",
+                    severity="WARNING",
+                    title="Heat Stress Warning",
+                    message=f"High temperature detected ({temp:.1f}°C). Activate foggers and evaporative cooling pads immediately.",
+                    device_id=device_id,
+                    batch_id=batch_id,
+                    current_value=temp
+                )
+            elif temp <= 30.0:
+                cooldown_tracker.reset_alert(farm_id, device_id, "TEMPERATURE")
+
+        # 3. Humidity Threshold
+        if humidity is not None:
+            hum = float(humidity)
+            if hum >= 85.0:
+                FCMService.send_alert_to_farm(
+                    farm_id=farm_id,
+                    farm_name=farm_name,
+                    alert_type="HUMIDITY",
+                    severity="WARNING",
+                    title="Excess Humidity Warning",
+                    message=f"Excessive humidity detected ({hum:.1f}%). Increase ventilation to suppress aerosol disease transmission.",
+                    device_id=device_id,
+                    batch_id=batch_id,
+                    current_value=hum
+                )
+            elif hum <= 75.0:
+                cooldown_tracker.reset_alert(farm_id, device_id, "HUMIDITY")
+
+        # 4. Sound (Acoustic Distress) Threshold
+        if sound_level is not None:
+            snd = float(sound_level)
+            if snd >= 75.0:
+                FCMService.send_alert_to_farm(
+                    farm_id=farm_id,
+                    farm_name=farm_name,
+                    alert_type="SOUND",
+                    severity="WARNING",
+                    title="Abnormal Vocalization Alert",
+                    message=f"Abnormal flock acoustic level detected ({snd:.1f} dB). Check shed for distress or equipment anomalies.",
+                    device_id=device_id,
+                    batch_id=batch_id,
+                    current_value=snd
+                )
+            elif snd <= 60.0:
+                cooldown_tracker.reset_alert(farm_id, device_id, "SOUND")
+    except Exception as e:
+        print(f"[Telemetry Threshold Notification Error] {e}")
+
+
 def create_alert(batch_id, device_id, prediction_id, title, description, severity):
     """
-    Create a new alert record.
+    Create a new alert record and trigger FCM push notification to the farm.
     """
     if not supabase:
-        return None
+        alert_obj = {
+            "id": int(time.time()),
+            "batch_id": batch_id,
+            "device_id": device_id,
+            "prediction_id": prediction_id,
+            "title": title,
+            "description": description,
+            "severity": severity or "MEDIUM",
+            "status": "UNRESOLVED",
+            "created_at": "now()"
+        }
+        _mock_alerts.append(alert_obj)
+        _dispatch_fcm_for_alert(batch_id, device_id, title, description, severity)
+        return alert_obj
     try:
         data = {
             "batch_id": batch_id,
@@ -1404,17 +1642,39 @@ def create_alert(batch_id, device_id, prediction_id, title, description, severit
             "status": "UNRESOLVED"
         }
         res = supabase.table("alerts").insert(data).execute()
-        if res.data and len(res.data) > 0:
-            return res.data[0]
-        return None
+        alert_result = res.data[0] if (res.data and len(res.data) > 0) else data
+        
+        # Dispatch FCM push notification
+        _dispatch_fcm_for_alert(batch_id, device_id, title, description, severity)
+        return alert_result
     except Exception as e:
         print(f"[Supabase Error] create_alert failed: {e}")
         return None
 
 
+def create_db_alert(batch_id, device_id, prediction_id, title, description, severity):
+    return create_alert(batch_id, device_id, prediction_id, title, description, severity)
+
+
+def get_all_devices():
+    """
+    Fetch all provisioned devices.
+    """
+    if not supabase:
+        return []
+    try:
+        res = supabase.table("devices")\
+            .select("id, farm_id")\
+            .execute()
+        return res.data or []
+    except Exception as e:
+        print(f"[Supabase Error] get_all_devices failed: {e}")
+        return []
+
+
 def get_devices_with_thingspeak():
     """
-    Fetch all devices configured with a ThingSpeak channel ID.
+    Fetch all devices that have a ThingSpeak channel configured.
     """
     if not supabase:
         return []
@@ -1522,7 +1782,7 @@ def get_all_farmers():
         return []
     try:
         res = supabase.table("profiles")\
-            .select("*, farm_members(farm_id, farms(*))")\
+            .select("*, farm_members(farm_id, farms(*, batches(*)))")\
             .eq("role", "FARMER")\
             .execute()
         data = res.data or []
@@ -1599,7 +1859,7 @@ def create_device_kit(
     row is created in `devices` with farm_id set.
 
     The thingspeak_write_api_key is stored server-side only and never returned
-    to farmer-facing API endpoints.
+    to the farmer app.
     """
     if not supabase:
         print(f"[Supabase Fallback] create_device_kit called for '{device_id}' in fallback mode.")
@@ -1614,8 +1874,6 @@ def create_device_kit(
             "id": device_id,
             "status": "Available",
         }
-        # Store extra metadata in columns if they exist (migrations may add them)
-        # We attempt upsert; if a column is missing Supabase will error and we catch it below
         extras = {}
         if name:
             extras["name"] = name
@@ -1632,7 +1890,6 @@ def create_device_kit(
         if thingspeak_write_api_key:
             extras["thingspeak_write_api_key"] = thingspeak_write_api_key
 
-        # Try with extras first; fall back to base row only if extras cause a column error
         try:
             res = supabase.table("device_kits").insert({**kit_data, **extras}).execute()
         except Exception as extra_err:
@@ -1643,7 +1900,6 @@ def create_device_kit(
                 raise extra_err
 
         row = res.data[0] if res.data else {**kit_data, **extras}
-        # Always return kit_id and name in the response dict for the admin UI
         row.setdefault("kit_id", kit_id)
         row.setdefault("name", name)
         return {"status": "success", "data": row}
@@ -1655,15 +1911,6 @@ def create_device_kit(
 def assign_device_to_farm(device_id: str, farmer_profile_id: str):
     """
     Assigns a device to a farmer's farm.
-
-    Flow:
-    1. Verify kit exists in device_kits and is Available (not already assigned).
-    2. Verify farmer profile exists and is APPROVED.
-    3. Resolve farm_id from farm_members (source of truth — never trust Android).
-    4. Ensure farm exists in farms table (create if needed).
-    5. Create row in devices (id=device_id, farm_id=farm_id) OR update if exists.
-    6. Mark device_kits.status = 'Active'.
-    7. Auto-create farm_settings row if missing.
     """
     if not supabase:
         print(f"[Supabase Fallback] assign_device_to_farm called in fallback mode.")
@@ -1676,7 +1923,6 @@ def assign_device_to_farm(device_id: str, farmer_profile_id: str):
             dev_check = supabase.table("devices").select("id, farm_id").eq("id", device_id).execute()
             if not dev_check.data:
                 return {"status": "error", "message": f"Device kit '{device_id}' not found. Register it first via POST /admin/kits."}
-            # Already a provisioned device
             existing_farm = dev_check.data[0].get("farm_id")
             if existing_farm:
                 return {
@@ -1702,7 +1948,7 @@ def assign_device_to_farm(device_id: str, farmer_profile_id: str):
                 "message": f"Farmer '{profile.get('name')}' is not yet approved (status: {profile.get('approval_status')})."
             }
 
-        # 3. Resolve farm_id from farm_members (authoritative — never trust Android-provided farm_id)
+        # 3. Resolve farm_id from farm_members
         member_res = supabase.table("farm_members").select("farm_id").eq("profile_id", farmer_profile_id).execute()
         if not member_res.data:
             return {"status": "error", "message": f"No farm membership found for profile '{farmer_profile_id}'. Farmer may not have a farm yet."}
@@ -1713,7 +1959,8 @@ def assign_device_to_farm(device_id: str, farmer_profile_id: str):
         if not farm_res.data:
             return {"status": "error", "message": f"Farm '{farm_id}' not found in farms table."}
 
-        # 5. Get ThingSpeak credentials from device_kits row (may or may not have extra columns)
+        # 5. Fetch kit metadata and ThingSpeak credentials from device_kits
+        kit_name = f"ESP32 Controller ({device_id})"
         thingspeak_channel_id = None
         thingspeak_read_api_key = None
         thingspeak_write_api_key = None
@@ -1730,23 +1977,20 @@ def assign_device_to_farm(device_id: str, farmer_profile_id: str):
         except Exception:
             kit_name = f"ESP32 Controller ({device_id})"
 
-        # 6. Upsert into devices table (create provisioned device row with farm_id)
+        # 6. Upsert into devices table
         device_row = {
             "id": device_id,
             "farm_id": farm_id,
-            "name": kit_name if 'kit_name' in dir() else f"ESP32 Controller ({device_id})",
+            "name": kit_name,
         }
         if thingspeak_channel_id:
             device_row["thingspeak_channel_id"] = thingspeak_channel_id
         if thingspeak_read_api_key:
             device_row["thingspeak_read_api_key"] = thingspeak_read_api_key
-        # thingspeak_write_api_key only stored if column exists in devices
 
-        # Check if device row already exists in devices table
         dev_existing = supabase.table("devices").select("id").eq("id", device_id).execute()
         if dev_existing.data:
-            # Update farm_id
-            supabase.table("devices").update({"farm_id": farm_id}).eq("id", device_id).execute()
+            supabase.table("devices").update(device_row).eq("id", device_id).execute()
         else:
             supabase.table("devices").insert(device_row).execute()
 
@@ -1754,7 +1998,7 @@ def assign_device_to_farm(device_id: str, farmer_profile_id: str):
         try:
             supabase.table("device_kits").update({"status": "Active"}).eq("id", device_id).execute()
         except Exception:
-            pass  # device_kits row may not exist if device was pre-existing
+            pass
 
         # 8. Ensure farm_settings row exists
         settings_res = supabase.table("farm_settings").select("device_id").eq("device_id", device_id).execute()
@@ -1796,29 +2040,58 @@ def get_all_kits():
         return []
     try:
         # Fetch pre-registered kits (not yet assigned to a farm)
-        kit_res = supabase.table("device_kits").select("id, status, registered_at").execute()
+        kit_res = supabase.table("device_kits").select(
+            "id, status, registered_at, name, kit_id, serial_number, firmware_version, thingspeak_channel_id, thingspeak_read_api_key"
+        ).execute()
         kits_raw = kit_res.data or []
 
         # Fetch provisioned devices (assigned to a farm)
         dev_res = supabase.table("devices").select(
-            "id, name, farm_id, thingspeak_channel_id, last_seen_at, created_at"
+            "id, name, farm_id, thingspeak_channel_id, thingspeak_read_api_key, created_at"
         ).execute()
         devices_raw = dev_res.data or []
         devices_by_id = {d["id"]: d for d in devices_raw}
+
+        # Resolve farm and farmer names
+        farms_res = supabase.table("farms").select("id, name, farm_members(profiles(id, name))").execute()
+        farm_info = {}
+        if farms_res.data:
+            for f in farms_res.data:
+                fid = f.get("id")
+                fname = f.get("name") or ""
+                members = f.get("farm_members") or []
+                farmer_id = ""
+                farmer_name = ""
+                if members and len(members) > 0:
+                    profile = members[0].get("profiles") or {}
+                    farmer_id = profile.get("id") or ""
+                    farmer_name = profile.get("name") or ""
+                farm_info[fid] = {
+                    "farm_name": fname,
+                    "farmer_id": farmer_id,
+                    "farmer_name": farmer_name
+                }
 
         # Merge: device_kits entries enriched with devices data where available
         result = []
         seen = set()
         for kit in kits_raw:
             dev = devices_by_id.get(kit["id"], {})
+            finfo = farm_info.get(dev.get("farm_id"), {})
             merged = {
                 "id": kit["id"],
-                "name": dev.get("name") or kit.get("id"),
+                "name": kit.get("name") or dev.get("name") or kit.get("id"),
+                "kit_id": kit.get("kit_id") or kit.get("id"),
+                "serial_number": kit.get("serial_number") or "",
+                "firmware_version": kit.get("firmware_version") or "",
                 "farm_id": dev.get("farm_id"),
-                "thingspeak_channel_id": dev.get("thingspeak_channel_id"),
-                "last_seen_at": dev.get("last_seen_at"),
+                "farm_name": finfo.get("farm_name", ""),
+                "farmer_id": finfo.get("farmer_id", ""),
+                "farmer_name": finfo.get("farmer_name", ""),
+                "thingspeak_channel_id": dev.get("thingspeak_channel_id") or kit.get("thingspeak_channel_id"),
+                "thingspeak_read_api_key": dev.get("thingspeak_read_api_key") or kit.get("thingspeak_read_api_key"),
                 "created_at": dev.get("created_at") or kit.get("registered_at"),
-                "lifecycle_status": kit.get("status", "Available"),
+                "lifecycle_status": kit.get("status") or ("Active" if dev.get("farm_id") else "Available"),
             }
             result.append(merged)
             seen.add(kit["id"])
@@ -1826,12 +2099,19 @@ def get_all_kits():
         # Also include devices that were provisioned without going through device_kits
         for dev in devices_raw:
             if dev["id"] not in seen:
+                finfo = farm_info.get(dev.get("farm_id"), {})
                 result.append({
                     "id": dev["id"],
-                    "name": dev.get("name"),
+                    "name": dev.get("name") or dev["id"],
+                    "kit_id": dev["id"],
+                    "serial_number": "",
+                    "firmware_version": "",
                     "farm_id": dev.get("farm_id"),
+                    "farm_name": finfo.get("farm_name", ""),
+                    "farmer_id": finfo.get("farmer_id", ""),
+                    "farmer_name": finfo.get("farmer_name", ""),
                     "thingspeak_channel_id": dev.get("thingspeak_channel_id"),
-                    "last_seen_at": dev.get("last_seen_at"),
+                    "thingspeak_read_api_key": dev.get("thingspeak_read_api_key"),
                     "created_at": dev.get("created_at"),
                     "lifecycle_status": "Active" if dev.get("farm_id") else "Available",
                 })
@@ -1922,3 +2202,173 @@ def save_device_wifi_config(device_id: str, ssid: str, password: str, farmer_id:
     except Exception as e:
         print(f"[Supabase Error] save_device_wifi_config failed: {e}")
         return {"status": "error", "message": str(e)}
+
+
+def get_alerts(batch_id=None):
+    if not supabase:
+        if batch_id:
+            return [a for a in _mock_alerts if a.get("batch_id") == batch_id]
+        return _mock_alerts
+    try:
+        query = supabase.table("alerts").select("*")
+        if batch_id:
+            query = query.eq("batch_id", batch_id)
+        res = query.order("created_at", desc=True).execute()
+        data = res.data or []
+        for alert in data:
+            alert["id"] = str(alert.get("id"))
+        return data
+    except Exception as e:
+        print(f"[Supabase Error] get_alerts failed: {e}")
+        return []
+
+def create_db_alert(batch_id, device_id, prediction_id, title, description, severity):
+    if not supabase:
+        new_id = len(_mock_alerts) + 1
+        alert = {
+            "id": str(new_id),
+            "batch_id": batch_id,
+            "device_id": device_id,
+            "prediction_id": prediction_id,
+            "title": title,
+            "description": description,
+            "severity": severity,
+            "status": "UNRESOLVED",
+            "created_at": "now()"
+        }
+        _mock_alerts.append(alert)
+        return alert
+    try:
+        data = {
+            "batch_id": batch_id,
+            "device_id": device_id,
+            "prediction_id": prediction_id,
+            "title": title,
+            "description": description,
+            "severity": severity,
+            "status": "UNRESOLVED"
+        }
+        res = supabase.table("alerts").insert(data).execute()
+        if res.data and len(res.data) > 0:
+            alert = dict(res.data[0])
+            alert["id"] = str(alert.get("id"))
+            return alert
+        return None
+    except Exception as e:
+        print(f"[Supabase Error] create_db_alert failed: {e}")
+        return None
+
+def update_alert_status(alert_id, status):
+    if not supabase:
+        for alert in _mock_alerts:
+            if alert.get("id") == str(alert_id):
+                alert["status"] = status
+                return True
+        return False
+    try:
+        res = supabase.table("alerts").update({"status": status}).eq("id", int(alert_id)).execute()
+        return True
+    except Exception as e:
+        print(f"[Supabase Error] update_alert_status failed: {e}")
+        return False
+
+def get_cases(vet_id=None, batch_id=None):
+    if not supabase:
+        cases = list(_mock_cases)
+        if vet_id:
+            cases = [c for c in cases if c.get("veterinarian_id") == vet_id]
+        if batch_id:
+            cases = [c for c in cases if c.get("batch_id") == batch_id]
+        return cases
+    try:
+        query = supabase.table("veterinary_cases").select("*")
+        if vet_id:
+            query = query.eq("veterinarian_id", vet_id)
+        if batch_id:
+            query = query.eq("batch_id", batch_id)
+        res = query.order("created_at", desc=True).execute()
+        data = res.data or []
+        for case in data:
+            case["id"] = str(case.get("id"))
+            if case.get("alert_id") is not None:
+                case["alert_id"] = str(case.get("alert_id"))
+        return data
+    except Exception as e:
+        print(f"[Supabase Error] get_cases failed: {e}")
+        return []
+
+def create_case(alert_id, batch_id, veterinarian_id, status):
+    new_id = str(uuid.uuid4())
+    case = {
+        "id": new_id,
+        "alert_id": str(alert_id) if alert_id else None,
+        "batch_id": batch_id,
+        "veterinarian_id": veterinarian_id,
+        "status": status,
+        "diagnosis": None,
+        "recommendation": None,
+        "treatment": None,
+        "follow_up_instructions": None,
+        "created_at": "now()",
+        "updated_at": "now()"
+    }
+    if not supabase:
+        _mock_cases.append(case)
+        return case
+    try:
+        data = {
+            "batch_id": batch_id,
+            "status": status
+        }
+        if alert_id is not None:
+            data["alert_id"] = int(alert_id)
+        if veterinarian_id is not None:
+            data["veterinarian_id"] = veterinarian_id
+        res = supabase.table("veterinary_cases").insert(data).execute()
+        if res.data and len(res.data) > 0:
+            result = dict(res.data[0])
+            result["id"] = str(result.get("id"))
+            if result.get("alert_id") is not None:
+                result["alert_id"] = str(result.get("alert_id"))
+            return result
+        # Supabase returned no data — fall back to mock
+        print("[Supabase] create_case: insert returned no data, falling back to mock storage")
+        _mock_cases.append(case)
+        return case
+    except Exception as e:
+        print(f"[Supabase Error] create_case failed: {e}")
+        print("[Supabase] Falling back to mock storage for this case")
+        _mock_cases.append(case)
+        return case
+
+def update_case(case_id, veterinarian_id, status, diagnosis, recommendation, treatment, follow_up_instructions):
+    # Try mock storage first (works for both offline and fallback cases)
+    for case in _mock_cases:
+        if case.get("id") == str(case_id):
+            case["veterinarian_id"] = veterinarian_id
+            case["status"] = status
+            case["diagnosis"] = diagnosis
+            case["recommendation"] = recommendation
+            case["treatment"] = treatment
+            case["follow_up_instructions"] = follow_up_instructions
+            case["updated_at"] = "now()"
+            return True
+    if not supabase:
+        return False
+    try:
+        data = {
+            "status": status,
+            "diagnosis": diagnosis,
+            "recommendation": recommendation,
+            "treatment": treatment,
+            "follow_up_instructions": follow_up_instructions,
+            "updated_at": "now()"
+        }
+        if veterinarian_id is not None:
+            data["veterinarian_id"] = veterinarian_id
+        res = supabase.table("veterinary_cases").update(data).eq("id", str(case_id)).execute()
+        return True
+    except Exception as e:
+        print(f"[Supabase Error] update_case failed: {e}")
+        return False
+

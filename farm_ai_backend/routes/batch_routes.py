@@ -4,7 +4,7 @@ from datetime import date
 
 batch_bp = Blueprint("batch_bp", __name__)
 
-@batch_bp.route('/api/v1/farms/<farm_id>/batches', methods=['POST'])
+@batch_bp.route('/farms/<farm_id>/batches', methods=['POST'])
 def start_poultry_batch(farm_id):
     try:
         data = request.get_json() or {}
@@ -52,7 +52,7 @@ def start_poultry_batch(farm_id):
         return jsonify({'error': f"Internal server error: {str(e)}"}), 500
 
 
-@batch_bp.route('/api/v1/farms/<farm_id>/batches/active', methods=['GET'])
+@batch_bp.route('/farms/<farm_id>/batches/active', methods=['GET'])
 def get_active_poultry_batch(farm_id):
     try:
         active_batch = get_active_batch(farm_id)
@@ -69,7 +69,7 @@ def get_active_poultry_batch(farm_id):
         return jsonify({'error': f"Internal server error: {str(e)}"}), 500
 
 
-@batch_bp.route('/api/v1/batches/<batch_id>/status', methods=['PUT'])
+@batch_bp.route('/batches/<batch_id>/status', methods=['PUT'])
 def close_poultry_batch(batch_id):
     try:
         data = request.get_json() or {}
@@ -98,6 +98,13 @@ def close_poultry_batch(batch_id):
         if res.get('status') == 'error':
             return jsonify({'error': res.get('message')}), 400
 
+        # Trigger Qdrant vectors cleanup for completed/closed batch
+        try:
+            from rag.qdrant_db import delete_batch_documents
+            delete_batch_documents(batch_id)
+        except Exception as qe:
+            print(f"[Batch API] Warning: Failed Qdrant cleanup for batch '{batch_id}': {qe}")
+
         return jsonify({
             'status': 'success',
             'message': f"Batch '{batch_id}' updated successfully to status '{status}'."
@@ -108,7 +115,7 @@ def close_poultry_batch(batch_id):
         return jsonify({'error': f"Internal server error: {str(e)}"}), 500
 
 
-@batch_bp.route('/api/v1/farms/<farm_id>/batches', methods=['GET'])
+@batch_bp.route('/farms/<farm_id>/batches', methods=['GET'])
 def get_all_poultry_batches(farm_id):
     try:
         batches = get_all_batches(farm_id)
@@ -121,7 +128,7 @@ def get_all_poultry_batches(farm_id):
         return jsonify({'error': f"Internal server error: {str(e)}"}), 500
 
 
-@batch_bp.route('/api/v1/batches/<batch_id>/mortality', methods=['POST'])
+@batch_bp.route('/batches/<batch_id>/mortality', methods=['POST'])
 def record_batch_mortality(batch_id):
     try:
         data = request.get_json() or {}

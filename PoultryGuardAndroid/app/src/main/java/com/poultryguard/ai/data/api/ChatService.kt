@@ -53,7 +53,10 @@ data class FarmContext(
     val currentSoundLevel: Float,
     val birdCount: Int,
     val loggedMortalities: Int,
-    val activeShed: String = "Shed #4"
+    val activeShed: String = "Shed #4",
+    val farmerId: String? = null,
+    val farmId: String? = null,
+    val batchId: String? = null
 )
 
 data class ChatRequest(
@@ -68,8 +71,11 @@ data class ChatResponse(
 
 
 interface FlaskChatApi {
-    @POST("api/v1/chat")
-    suspend fun getChatCompletion(@Body request: ChatRequest): ChatResponse
+    @POST("chat")
+    suspend fun getChatCompletion(
+        @Header("Authorization") authHeader: String?,
+        @Body request: ChatRequest
+    ): ChatResponse
 }
 
 class ChatService(private val apiKey: String) {
@@ -132,13 +138,16 @@ class ChatRepository(private val context: Context) {
     ): String {
         return try {
             val api = getApi() ?: throw Exception("Retrofit API not initialized.")
+            val userProfile = cacheManager.getCachedUserProfile()
+            val authHeader = userProfile?.token?.let { "Bearer $it" }
+                ?: userProfile?.uid?.let { "Bearer mock_token_for_$it" }
             
             val request = ChatRequest(
                 message = message,
                 history = history,
                 farmContext = context
             )
-            val response = api.getChatCompletion(request)
+            val response = api.getChatCompletion(authHeader, request)
             response.reply
         } catch (e: Exception) {
             Log.e("PoultryGuardChat", "Error contacting LLM API: ${e.localizedMessage}", e)

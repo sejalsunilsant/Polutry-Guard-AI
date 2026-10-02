@@ -1,37 +1,45 @@
 package com.poultryguard.ai.ui.profile
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.content.Intent
-import android.net.Uri
-import androidx.compose.runtime.*
-import androidx.compose.ui.platform.LocalContext
-import com.poultryguard.ai.data.model.UserProfile
-import com.poultryguard.ai.data.model.FarmerProfile
-import com.poultryguard.ai.data.cache.LocalCacheManager
 import com.poultryguard.ai.data.cache.AppDatabase
+import com.poultryguard.ai.data.cache.LocalCacheManager
+import com.poultryguard.ai.data.model.FarmerProfile
+import com.poultryguard.ai.data.model.UserProfile
 import com.poultryguard.ai.ui.theme.*
+import kotlinx.coroutines.launch
+import java.util.UUID
 
 @Composable
 fun ProfileScreen(
@@ -43,8 +51,11 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val db = remember { AppDatabase.getDatabase(context.applicationContext) }
+    val cacheManager = remember { LocalCacheManager(context) }
+    val coroutineScope = rememberCoroutineScope()
     var farmerProfile by remember { mutableStateOf<FarmerProfile?>(null) }
     var vetProfile by remember { mutableStateOf<com.poultryguard.ai.data.model.Veterinarian?>(null) }
+    var showEditProfileDialog by remember { mutableStateOf(false) }
     
     LaunchedEffect(userProfile.email) {
         if (userProfile.email.isNotBlank()) {
@@ -64,6 +75,13 @@ fun ProfileScreen(
     }
     val veterinariansState = vetRepository.getVeterinariansFlow().collectAsState(initial = emptyList())
     val veterinarians = veterinariansState.value
+
+    val effectiveFarmerName = if (userProfile.role == com.poultryguard.ai.data.model.UserRole.FARMER && !farmerProfile?.name.isNullOrBlank()) {
+        farmerProfile!!.name
+    } else {
+        userProfile.name
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = AppBackground
@@ -90,7 +108,7 @@ fun ProfileScreen(
                             .background(GreenPrimary.copy(alpha = 0.12f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        val firstLetter = if (userProfile.name.isNotEmpty()) userProfile.name.take(1).uppercase() else "F"
+                        val firstLetter = if (effectiveFarmerName.isNotEmpty()) effectiveFarmerName.take(1).uppercase() else "F"
                         Text(
                             text = firstLetter,
                             fontSize = 40.sp,
@@ -100,7 +118,7 @@ fun ProfileScreen(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = userProfile.name,
+                        text = effectiveFarmerName,
                         style = Typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -134,13 +152,39 @@ fun ProfileScreen(
                     colors = CardDefaults.cardColors(containerColor = CardSurface)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "Contact Details",
-                            style = Typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = TextDark,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Contact Details",
+                                style = Typography.bodyLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = TextDark
+                            )
+                            if (userProfile.role == com.poultryguard.ai.data.model.UserRole.FARMER) {
+                                TextButton(
+                                    onClick = { showEditProfileDialog = true },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Edit Profile",
+                                        tint = GreenPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Edit",
+                                        color = GreenPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
                         ContactItem(
                             icon = Icons.Default.Email,
                             label = "Email Address",
@@ -192,12 +236,6 @@ fun ProfileScreen(
                             title = "IoT Gateway Cryptographic Keys",
                             subtitle = "Authorized firmware connection",
                             onClick = onNavigateToHardwareConfig
-                        )
-                        Divider(color = DividerColor, thickness = 1.dp, modifier = Modifier.padding(vertical = 10.dp))
-                        ProfileSettingRow(
-                            icon = Icons.Default.Person,
-                            title = "Sub-Farmer Access Logs",
-                            subtitle = "Manage permissions for shift handlers"
                         )
                     }
                 }
@@ -251,9 +289,9 @@ fun ProfileScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(52.dp)
-                                    .clip(CircleShape)
-                                    .background(GreenPrimary.copy(alpha = 0.08f)),
+                                .size(52.dp)
+                                .clip(CircleShape)
+                                .background(GreenPrimary.copy(alpha = 0.08f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 val initials = if (vet.name.startsWith("Dr. ")) {
@@ -335,97 +373,6 @@ fun ProfileScreen(
                 }
             }
 
-            // Flask API Configuration Card
-            item {
-                val context = LocalContext.current
-                val cacheManager = remember { LocalCacheManager(context) }
-                var urlText by remember { mutableStateOf(cacheManager.getApiBaseUrl()) }
-                var isEditing by remember { mutableStateOf(false) }
-
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = CardSurface)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = "Flask API Configuration",
-                            style = Typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = TextDark,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-                        
-                        if (isEditing) {
-                            OutlinedTextField(
-                                value = urlText,
-                                onValueChange = { urlText = it },
-                                label = { Text("Base API URL") },
-                                placeholder = { Text("e.g. http://10.0.2.2:5000/") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = GreenPrimary,
-                                    unfocusedBorderColor = DividerColor,
-                                    focusedLabelColor = GreenPrimary
-                                )
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                TextButton(onClick = {
-                                    urlText = cacheManager.getApiBaseUrl()
-                                    isEditing = false
-                                }) {
-                                    Text("Cancel", color = TextMedium)
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(
-                                    onClick = {
-                                        cacheManager.saveApiBaseUrl(urlText)
-                                        // Refresh the text view in case formatting added trailing slash
-                                        urlText = cacheManager.getApiBaseUrl()
-                                        isEditing = false
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text("Save", color = Color.White)
-                                }
-                            }
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Base Server URL",
-                                        style = Typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextDark
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = urlText,
-                                        style = Typography.bodyMedium,
-                                        color = TextMedium
-                                    )
-                                }
-                                TextButton(
-                                    onClick = { isEditing = true }
-                                ) {
-                                    Text("Edit", color = GreenPrimary, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             // Clean, red-themed Sign Out Button
             item {
                 Button(
@@ -445,6 +392,187 @@ fun ProfileScreen(
                 }
             }
         }
+    }
+
+    if (showEditProfileDialog && userProfile.role == com.poultryguard.ai.data.model.UserRole.FARMER) {
+        var editName by remember(farmerProfile) { mutableStateOf(farmerProfile?.name?.ifBlank { userProfile.name } ?: userProfile.name) }
+        var editFarmName by remember(farmerProfile) { mutableStateOf(farmerProfile?.farmName?.ifBlank { userProfile.farmName } ?: userProfile.farmName) }
+        var editPhone by remember(farmerProfile) { mutableStateOf(farmerProfile?.phone ?: "") }
+        var editLocation by remember(farmerProfile) { mutableStateOf(farmerProfile?.farmLocation ?: "") }
+        var isSaving by remember { mutableStateOf(false) }
+
+        AlertDialog(
+            onDismissRequest = { if (!isSaving) showEditProfileDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        tint = GreenPrimary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Text(
+                        text = "Edit Farmer Profile",
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextDark
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Update your farm operator details and SMS alert contact.",
+                        style = Typography.bodyMedium,
+                        color = TextMedium
+                    )
+
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("Owner / Operator Name") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Person, contentDescription = null, tint = GreenPrimary)
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GreenPrimary,
+                            unfocusedBorderColor = DividerColor,
+                            focusedLabelColor = GreenPrimary
+                        )
+                    )
+
+                    OutlinedTextField(
+                        value = editFarmName,
+                        onValueChange = { editFarmName = it },
+                        label = { Text("Farm Name") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Home, contentDescription = null, tint = GreenPrimary)
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GreenPrimary,
+                            unfocusedBorderColor = DividerColor,
+                            focusedLabelColor = GreenPrimary
+                        )
+                    )
+
+                    OutlinedTextField(
+                        value = editPhone,
+                        onValueChange = { editPhone = it },
+                        label = { Text("SMS Alarm / Phone Number") },
+                        placeholder = { Text("+1 (555) 000-0000") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Phone, contentDescription = null, tint = GreenPrimary)
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GreenPrimary,
+                            unfocusedBorderColor = DividerColor,
+                            focusedLabelColor = GreenPrimary
+                        )
+                    )
+
+                    OutlinedTextField(
+                        value = editLocation,
+                        onValueChange = { editLocation = it },
+                        label = { Text("Geographical Region / Location") },
+                        placeholder = { Text("e.g. Springfield, IL") },
+                        leadingIcon = {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, tint = GreenPrimary)
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GreenPrimary,
+                            unfocusedBorderColor = DividerColor,
+                            focusedLabelColor = GreenPrimary
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isSaving = true
+                        coroutineScope.launch {
+                            val current = farmerProfile ?: FarmerProfile(
+                                id = userProfile.uid.ifBlank { UUID.randomUUID().toString() },
+                                name = editName.trim(),
+                                email = userProfile.email,
+                                phone = editPhone.trim(),
+                                accountStatus = "Active",
+                                lastActive = "Just now",
+                                isOnline = true,
+                                farmName = editFarmName.trim(),
+                                farmLocation = editLocation.trim(),
+                                totalSheds = 1,
+                                floorSpaceSqFt = 1000,
+                                deviceId = "",
+                                deviceSerial = "",
+                                firmwareVersion = "",
+                                activeBatchId = "",
+                                activeBatchStartDate = "",
+                                chickAgeDays = 0,
+                                feedConsumedKg = 0f,
+                                mortalitiesCount = 0,
+                                openDiseaseAlertsCount = 0
+                            )
+                            val updated = current.copy(
+                                name = editName.trim().ifBlank { current.name },
+                                farmName = editFarmName.trim().ifBlank { current.farmName },
+                                phone = editPhone.trim(),
+                                farmLocation = editLocation.trim()
+                            )
+                            db.farmerProfileDao().insert(updated)
+                            farmerProfile = updated
+
+                            // Update cached user profile if present
+                            val cachedUser = cacheManager.getCachedUserProfile()
+                            if (cachedUser != null) {
+                                cacheManager.cacheUserProfile(
+                                    cachedUser.copy(
+                                        name = updated.name,
+                                        farmName = updated.farmName
+                                    )
+                                )
+                            }
+
+                            Toast.makeText(context, "Farmer profile updated successfully", Toast.LENGTH_SHORT).show()
+                            isSaving = false
+                            showEditProfileDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                    shape = RoundedCornerShape(10.dp),
+                    enabled = !isSaving
+                ) {
+                    Text(if (isSaving) "Saving..." else "Save Changes", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showEditProfileDialog = false },
+                    enabled = !isSaving
+                ) {
+                    Text("Cancel", color = TextMedium)
+                }
+            },
+            containerColor = CardSurface,
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 }
 

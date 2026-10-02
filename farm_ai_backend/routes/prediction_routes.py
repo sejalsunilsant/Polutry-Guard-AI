@@ -13,7 +13,7 @@ from ml.preprocessing import (
 
 prediction_bp = Blueprint("prediction_bp", __name__)
 
-@prediction_bp.route('/api/v1/predictions/latest', methods=['GET'])
+@prediction_bp.route('/predictions/latest', methods=['GET'])
 def get_latest_prediction_endpoint():
     try:
         device_id = request.args.get('deviceId')
@@ -41,7 +41,7 @@ def get_latest_prediction_endpoint():
         print(f"[Prediction API] Error in get_latest_prediction_endpoint: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@prediction_bp.route('/api/v1/predict-disease', methods=['POST'])
+@prediction_bp.route('/predict-disease', methods=['POST'])
 def predict_disease_endpoint():
     try:
         data = request.get_json() or {}
@@ -236,14 +236,16 @@ def predict_disease_endpoint():
         # 8. Dynamic Recommendations
         if ammonia >= 25.0:
             recommendation = f"CRITICAL AMMONIA ALERT: Air quality is hazardous ({ammonia} ppm). Exhaust fans must run at 100% capacity."
+        elif fused_disease == "Infectious Coryza":
+            recommendation = f"INFECTIOUS CORYZA ALERT: Elevated risk of acute respiratory infection ({int(confidence * 100)}% confidence). Consult vet for antimicrobial therapy, isolate birds with facial swelling, and sanitize water lines."
+        elif fused_disease == "Fowlpox":
+            recommendation = f"FOWLPOX ALERT: High risk of viral Fowlpox ({int(confidence * 100)}% confidence). Isolate symptomatic birds, control mosquito vectors, and apply topical antiseptics to lesions."
         elif fused_disease == "Newcastle":
             recommendation = f"NEWCASTLE WARNING: High risk of Newcastle ({int(confidence * 100)}% confidence). Ensure quarantine and inspect flock."
         elif fused_disease == "Avian Influenza":
             recommendation = f"AVIAN INFLUENZA WARNING: High risk of Avian Influenza ({int(confidence * 100)}% confidence). Check for visual lethargy."
         elif fused_disease == "Coccidiosis":
             recommendation = f"COCCIDIOSIS DETECTED: Risk of digestive infection ({int(confidence * 100)}% confidence). Keep litter dry."
-        elif fused_disease == "Fowlpox":
-            recommendation = f"FOWLPOX ALERT: Risk of Fowlpox ({int(confidence * 100)}% confidence). Check comb/wattle lesions."
         elif fused_disease == "Infectious Bronchitis":
             recommendation = f"INFECTIOUS BRONCHITIS ALERT: Risk of IB respiratory infection ({int(confidence * 100)}% confidence). Gasping vocalizations possible."
         else:
@@ -322,7 +324,7 @@ def predict_disease_endpoint():
         print(f"[Prediction API] Disease prediction error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@prediction_bp.route('/api/v1/predict-sound', methods=['POST'])
+@prediction_bp.route('/predict-sound', methods=['POST'])
 def predict_sound_endpoint():
     try:
         if 'file' not in request.files:
@@ -397,7 +399,7 @@ def upload_media_bytes(file_bytes, bucket_name, folder, file_name):
         return None
 
 
-@prediction_bp.route('/api/v1/guardian/predict', methods=['POST'])
+@prediction_bp.route('/guardian/predict', methods=['POST'])
 def guardian_predict_endpoint():
     try:
         import time
@@ -452,18 +454,9 @@ def guardian_predict_endpoint():
                 sound_file.save(temp_path)
             
             try:
-                waveform, sr = preprocess_audio(temp_path)
-                if is_valid_sound_clip(waveform, sr):
-                    mel = librosa.feature.melspectrogram(y=waveform, sr=sr, n_mels=128)
-                    log_mel = librosa.power_to_db(mel)
-                    if log_mel.shape[1] < 173:
-                        pad = 173 - log_mel.shape[1]
-                        log_mel = np.pad(log_mel, ((0, 0), (0, pad)))
-                    else:
-                        log_mel = log_mel[:, :173]
-                    sound_pred = ModelManager.predict_sound(log_mel)
+                sound_pred = ModelManager.predict_sound(temp_path)
             except Exception as se:
-                print(f"[Prediction API] Sound preprocessing failed: {se}")
+                print(f"[Prediction API] Sound prediction failed: {se}")
             finally:
                 # Cleanup temp sound file
                 try:
@@ -542,14 +535,16 @@ def guardian_predict_endpoint():
         # Generate biosecurity recommendations
         if ammonia >= 25.0:
             recommendation = f"CRITICAL AMMONIA ALERT: Air quality is hazardous ({ammonia} ppm). Exhaust ventilation fans must run at 100% capacity to flush the house and prevent permanent respiratory tract burns."
+        elif fused_disease == "Infectious Coryza":
+            recommendation = f"INFECTIOUS CORYZA ALERT: Elevated risk of acute respiratory bacterial infection ({int(confidence * 100)}% confidence). Acoustic gasping/rales and facial swelling detected. Consult flock veterinarian for antimicrobial therapy, separate symptomatic birds, and sanitize water lines."
+        elif fused_disease == "Fowlpox":
+            recommendation = f"FOWLPOX ALERT: High risk of Fowlpox infection ({int(confidence * 100)}% confidence). Visual check reveals possible comb/wattle lesions. Isolate symptomatic birds, control mosquitos, and apply antiseptic."
         elif fused_disease == "Newcastle":
             recommendation = f"NEWCASTLE DISEASE WARNING: High risk of Newcastle infection ({int(confidence * 100)}% confidence). Acoustic/visual metrics show gasping and abnormal posture. Quarantine affected birds and contact your vet immediately."
         elif fused_disease == "Avian Influenza":
             recommendation = f"AVIAN INFLUENZA WARNING: High risk of Avian Influenza ({int(confidence * 100)}% confidence). Visual monitors show extreme lethargy and abnormal appearance. Alert biosecurity officers and isolate the flock."
         elif fused_disease == "Coccidiosis":
             recommendation = f"COCCIDIOSIS DETECTED: Elevated risk of digestive infection ({int(confidence * 100)}% confidence). Visual cues show huddling/lying. Ensure composted litter is dry, feed is dry, and treat with coccidiostats."
-        elif fused_disease == "Fowlpox":
-            recommendation = f"FOWLPOX ALERT: High risk of Fowlpox infection ({int(confidence * 100)}% confidence). Visual check reveals possible comb/wattle lesions. Isolate symptomatic birds, control mosquitos, and apply antiseptic."
         elif fused_disease == "Infectious Bronchitis":
             recommendation = f"INFECTIOUS BRONCHITIS ALERT: High risk of IB respiratory infection ({int(confidence * 100)}% confidence). Detected heavy coughing/gasping. Stabilize shed temperature and mist disinfectant to suppress aerosol transmission."
         else:
@@ -618,7 +613,7 @@ def guardian_predict_endpoint():
                 severity=risk_level
             )
 
-        timestamp_str = datetime.datetime.utcnow().isoformat() + "Z"
+        timestamp_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
         
         return jsonify({
             "status": "success",
@@ -633,4 +628,43 @@ def guardian_predict_endpoint():
     except Exception as e:
         print(f"[Prediction API] Guardian prediction error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@prediction_bp.route('/ml/sync-images', methods=['POST'])
+def sync_unprocessed_images_endpoint():
+    """
+    Manually triggers backlog processing for all unpredicted images in Supabase Storage.
+    """
+    try:
+        from services.image_pipeline_service import ImagePipelineService
+        results = ImagePipelineService.process_all_unprocessed_images()
+        return jsonify({
+            "status": "success",
+            "processed_count": len(results),
+            "results": results
+        }), 200
+    except Exception as e:
+        print(f"[Prediction API] Image sync error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@prediction_bp.route('/ml/process-image', methods=['POST'])
+def process_single_storage_image_endpoint():
+    """
+    Webhook endpoint callable when a new file is uploaded to Supabase Storage.
+    Payload: {"name": "farm_a/shed_1_cam/image_20261002.jpg"} or {"record": {"name": "..."}}
+    """
+    try:
+        data = request.get_json() or {}
+        file_path = data.get("name") or data.get("record", {}).get("name") or data.get("filePath")
+        if not file_path:
+            return jsonify({"status": "error", "message": "File path 'name' is required"}), 400
+
+        from services.image_pipeline_service import ImagePipelineService
+        res = ImagePipelineService.process_single_image(file_path)
+        return jsonify(res), 200
+    except Exception as e:
+        print(f"[Prediction API] Process single image error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 

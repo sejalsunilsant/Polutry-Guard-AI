@@ -91,16 +91,16 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     )
 
     init {
+        cacheManager.clearCachedTelemetry()
         loadCachedData()
         loadInitialData()
     }
 
     private fun loadCachedData() {
-        val cachedTelemetry = cacheManager.getCachedTelemetry()
-        currentTemp = cachedTelemetry["temp"]
-        currentHumid = cachedTelemetry["humid"]
-        currentAmmonia = cachedTelemetry["ammonia"]
-        currentSound = cachedTelemetry["sound"]
+        currentTemp = null
+        currentHumid = null
+        currentAmmonia = null
+        currentSound = null
         
         activeBatch = cacheManager.getCachedActiveBatch()
     }
@@ -259,7 +259,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     // Conversational Chat logic with active Farm Context
     fun sendChatMessage(text: String) {
-        if (text.isBlank()) return
+        if (text.isBlank() || _isTyping.value) return
         
         val userMsg = ChatMessage(sender = "USER", text = text)
         _chatMessages.value = _chatMessages.value + userMsg
@@ -281,7 +281,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 currentSoundLevel = currentSound ?: 0f,
                 birdCount = dynamicBirdCount,
                 loggedMortalities = unsyncedMortalities,
-                activeShed = currentBatch?.let { "${it.id} (${it.breed})" } ?: "No Active Batch"
+                activeShed = currentBatch?.let { "${it.id} (${it.breed})" } ?: "No Active Batch",
+                farmerId = farmerId.ifBlank { null },
+                farmId = farmId.ifBlank { null },
+                batchId = currentBatch?.id
             )
 
             // Dynamic background completion request
@@ -388,48 +391,53 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         val timeStr = dateFormat.format(Date())
 
+        val tempVal = currentTemp ?: 0f
+        val humidVal = currentHumid ?: 0f
+        val ammoniaVal = currentAmmonia ?: 0f
+        val soundVal = currentSound ?: 0f
+
         val readings = listOf(
             SensorReading(
                 id = "temperature",
                 name = "Temperature",
-                value = currentTemp,
+                value = tempVal,
                 unit = "°C",
-                status = getTempStatus(currentTemp),
+                status = getTempStatus(tempVal),
                 timestamp = timeStr,
-                description = getTempDescription(currentTemp),
+                description = getTempDescription(tempVal),
                 rangeMin = 10f, rangeMax = 45f,
                 idealMin = 21f, idealMax = 27f
             ),
             SensorReading(
                 id = "humidity",
                 name = "Humidity",
-                value = currentHumid,
+                value = humidVal,
                 unit = "%",
-                status = getHumidStatus(currentHumid),
+                status = getHumidStatus(humidVal),
                 timestamp = timeStr,
-                description = getHumidDescription(currentHumid),
+                description = getHumidDescription(humidVal),
                 rangeMin = 20f, rangeMax = 95f,
                 idealMin = 50f, idealMax = 70f
             ),
             SensorReading(
                 id = "ammonia",
                 name = "Ammonia Gas",
-                value = currentAmmonia,
+                value = ammoniaVal,
                 unit = "ppm",
-                status = getAmmoniaStatus(currentAmmonia),
+                status = getAmmoniaStatus(ammoniaVal),
                 timestamp = timeStr,
-                description = getAmmoniaDescription(currentAmmonia),
+                description = getAmmoniaDescription(ammoniaVal),
                 rangeMin = 0f, rangeMax = 60f,
                 idealMin = 0f, idealMax = 20f
             ),
             SensorReading(
                 id = "sound",
                 name = "Acoustic Panic",
-                value = currentSound,
+                value = soundVal,
                 unit = "dB",
-                status = getSoundStatus(currentSound),
+                status = getSoundStatus(soundVal),
                 timestamp = timeStr,
-                description = getSoundDescription(currentSound),
+                description = getSoundDescription(soundVal),
                 rangeMin = 30f, rangeMax = 110f,
                 idealMin = 40f, idealMax = 65f
             )
@@ -465,7 +473,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getTempStatus(valFloat: Float?): SensorStatus {
-        if (valFloat == null) return SensorStatus.IDEAL
+        if (valFloat == null || valFloat == 0f) return SensorStatus.IDEAL
         return when {
             valFloat < 19f || valFloat > 30f -> SensorStatus.CRITICAL
             valFloat < 21f || valFloat > 27f -> SensorStatus.WARNING
@@ -474,7 +482,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getTempDescription(valFloat: Float?): String {
-        if (valFloat == null) return "Waiting for temperature telemetry..."
+        if (valFloat == null || valFloat == 0f) return "Sensor kit offline / No live telemetry (0.0 °C)"
         return when (getTempStatus(valFloat)) {
             SensorStatus.IDEAL -> "Shed heat is in standard cozy broiler comfort range."
             SensorStatus.WARNING -> "Mild thermal variance. Keep monitoring ventilation."
@@ -483,7 +491,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getHumidStatus(valFloat: Float?): SensorStatus {
-        if (valFloat == null) return SensorStatus.IDEAL
+        if (valFloat == null || valFloat == 0f) return SensorStatus.IDEAL
         return when {
             valFloat < 45f || valFloat > 80f -> SensorStatus.CRITICAL
             valFloat < 50f || valFloat > 70f -> SensorStatus.WARNING
@@ -492,7 +500,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getHumidDescription(valFloat: Float?): String {
-        if (valFloat == null) return "Waiting for humidity telemetry..."
+        if (valFloat == null || valFloat == 0f) return "Sensor kit offline / No live telemetry (0.0 %)"
         return when (getHumidStatus(valFloat)) {
             SensorStatus.IDEAL -> "Cohesive humidity level. Dampness check OK."
             SensorStatus.WARNING -> "Moderate dampness. Check air replacement cycles."
@@ -501,7 +509,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getAmmoniaStatus(valFloat: Float?): SensorStatus {
-        if (valFloat == null) return SensorStatus.IDEAL
+        if (valFloat == null || valFloat == 0f) return SensorStatus.IDEAL
         return when {
             valFloat >= 25f -> SensorStatus.CRITICAL
             valFloat >= 16f -> SensorStatus.WARNING
@@ -510,7 +518,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getAmmoniaDescription(valFloat: Float?): String {
-        if (valFloat == null) return "Waiting for ammonia telemetry..."
+        if (valFloat == null || valFloat == 0f) return "Sensor kit offline / No live telemetry (0.0 ppm)"
         return when (getAmmoniaStatus(valFloat)) {
             SensorStatus.IDEAL -> "Ammonia is safe. Air quality is pristine."
             SensorStatus.WARNING -> "Slight gas buildup detected. Cycle exhaust fans."
@@ -519,7 +527,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getSoundStatus(valFloat: Float?): SensorStatus {
-        if (valFloat == null) return SensorStatus.IDEAL
+        if (valFloat == null || valFloat == 0f) return SensorStatus.IDEAL
         return when {
             valFloat >= 75f -> SensorStatus.CRITICAL
             valFloat >= 66f -> SensorStatus.WARNING
@@ -528,7 +536,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getSoundDescription(valFloat: Float?): String {
-        if (valFloat == null) return "Waiting for acoustic telemetry..."
+        if (valFloat == null || valFloat == 0f) return "Sensor kit offline / No live telemetry (0.0 dB)"
         return when (getSoundStatus(valFloat)) {
             SensorStatus.IDEAL -> "Steady, natural chirping levels. Flock is calm."
             SensorStatus.WARNING -> "Elevated noise. Disturbance or feeding rush active."

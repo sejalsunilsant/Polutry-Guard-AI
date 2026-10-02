@@ -37,6 +37,7 @@ import com.poultryguard.ai.data.model.SensorReading
 import com.poultryguard.ai.data.model.SensorStatus
 import com.poultryguard.ai.ui.components.*
 import com.poultryguard.ai.ui.theme.*
+import com.poultryguard.ai.ui.localization.*
 import com.poultryguard.ai.data.model.ageDays
 
 import androidx.compose.foundation.BorderStroke

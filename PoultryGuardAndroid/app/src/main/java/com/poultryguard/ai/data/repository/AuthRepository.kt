@@ -43,9 +43,12 @@ interface AuthRepository {
     suspend fun getPendingFarmers(): Result<List<com.poultryguard.ai.data.api.PendingFarmerDto>>
     suspend fun reviewFarmer(profileId: String, action: String, rejectionReason: String? = null): Result<Unit>
     suspend fun syncAllFarmers(): Result<Unit>
+    suspend fun syncAllKits(): Result<List<com.poultryguard.ai.data.model.HardwareKit>>
     suspend fun fetchUserContext(profileId: String): Result<com.poultryguard.ai.data.api.UserContextDto>
     suspend fun configureWifi(deviceId: String, ssid: String, password: String): Result<Unit>
+    suspend fun updateFcmToken(fcmToken: String): Result<Boolean>
 }
+
 
 class SupabaseAuthRepository(private val context: Context) : AuthRepository {
 
@@ -259,6 +262,7 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                 val farmers = response.data.map { dto ->
                     val farmMember = dto.farmMembers?.firstOrNull()
                     val farm = farmMember?.farms
+                    val activeBatch = farm?.batches?.firstOrNull { it.status == "ACTIVE" }
                     com.poultryguard.ai.data.model.FarmerProfile(
                         id = dto.id,
                         name = dto.name,
@@ -276,7 +280,7 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                         deviceId = "",
                         deviceSerial = "",
                         firmwareVersion = "",
-                        activeBatchId = "",
+                        activeBatchId = activeBatch?.id ?: "",
                         activeBatchStartDate = "",
                         chickAgeDays = 0,
                         feedConsumedKg = 0.0f,
@@ -289,6 +293,36 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                 Result.success(Unit)
             } else {
                 Result.failure(Exception("Failed to fetch farmers from backend."))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun syncAllKits(): Result<List<com.poultryguard.ai.data.model.HardwareKit>> = withContext(Dispatchers.IO) {
+        try {
+            val api = getApi()
+            val response = api.listKits()
+            if (response.status == "success" && response.data != null) {
+                val kits = response.data.map { dto ->
+                    com.poultryguard.ai.data.model.HardwareKit(
+                        gatewayId = dto.id ?: "",
+                        kitId = if (!dto.kitId.isNullOrBlank()) dto.kitId else (dto.id ?: ""),
+                        farmerName = dto.farmerName ?: "",
+                        farmName = dto.farmName ?: "",
+                        farmerId = dto.farmerId ?: "",
+                        serialNumber = dto.serialNumber ?: "",
+                        firmwareVersion = dto.firmwareVersion ?: "",
+                        lifecycleStatus = dto.lifecycleStatus ?: (if (!dto.farmId.isNullOrBlank()) "Active" else "Available"),
+                        isProvisioned = !dto.farmId.isNullOrBlank(),
+                        isActive = !dto.farmId.isNullOrBlank(),
+                        provisionedAt = dto.createdAt ?: ""
+                    )
+                }
+                cacheManager.saveHardwareKits(kits)
+                Result.success(kits)
+            } else {
+                Result.failure(Exception(response.message ?: "Failed to fetch kits from backend."))
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -389,9 +423,27 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                         verificationStatus = existing?.verificationStatus ?: "VERIFIED",
                         licenseNumber = dto.licenseNumber ?: existing?.licenseNumber ?: "",
                         qualification = dto.qualification ?: existing?.qualification ?: "",
-                        experience = dto.experience ?: existing?.experience ?: 0
+                        experience = dto.experience ?: existing?.experience ?: 0,
+                        latitude = dto.latitude ?: existing?.latitude,
+                        longitude = dto.longitude ?: existing?.longitude
                     )
                     db.vetDao().insert(newVet)
+                }
+
+                // Autoritative role cache update for all logged-in profiles
+                val cachedProfile = cacheManager.getCachedUserProfile()
+                if (cachedProfile != null && cachedProfile.uid == dto.profileId) {
+                    val targetRole = when (dto.role.uppercase()) {
+                        "VETERINARIAN" -> com.poultryguard.ai.data.model.UserRole.VETERINARIAN
+                        "ADMIN" -> com.poultryguard.ai.data.model.UserRole.ADMIN
+                        "SUPER_ADMIN" -> com.poultryguard.ai.data.model.UserRole.ADMIN
+                        else -> com.poultryguard.ai.data.model.UserRole.FARMER
+                    }
+                    cacheManager.cacheUserProfile(cachedProfile.copy(
+                        role = targetRole,
+                        farmName = dto.farmName ?: cachedProfile.farmName,
+                        farmId = dto.farmId ?: cachedProfile.farmId
+                    ))
                 }
                 Result.success(dto)
             } else {
@@ -415,6 +467,28 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                 Result.success(Unit)
             } else {
                 Result.failure(Exception(response.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateFcmToken(fcmToken: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            cacheManager.saveFcmToken(fcmToken)
+            val cachedUser = cacheManager.getCachedUserProfile()
+            val profileId = cachedUser?.uid
+            if (profileId.isNullOrBlank()) {
+                return@withContext Result.success(true)
+            }
+            val api = getAuthApi() ?: return@withContext Result.success(true)
+            val response = api.updateFcmToken(
+                com.poultryguard.ai.data.api.UpdateFcmTokenRequest(profileId = profileId, fcmToken = fcmToken)
+            )
+            if (response.status == "success") {
+                Result.success(true)
+            } else {
+                Result.failure(Exception(response.message ?: "Failed to sync FCM token"))
             }
         } catch (e: Exception) {
             Result.failure(e)

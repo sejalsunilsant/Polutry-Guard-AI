@@ -20,6 +20,16 @@ class LocalCacheManager(context: Context) {
         private const val KEY_LAST_AMMONIA = "last_cached_ammonia"
         private const val KEY_LAST_SOUND = "last_cached_sound"
         private const val KEY_MORTALITIES = "cached_mortalities_count"
+        private const val KEY_FCM_TOKEN = "cached_fcm_token"
+    }
+
+    // FCM Device Token
+    fun saveFcmToken(token: String) {
+        prefs.edit().putString(KEY_FCM_TOKEN, token).apply()
+    }
+
+    fun getFcmToken(): String? {
+        return prefs.getString(KEY_FCM_TOKEN, null)
     }
 
     // Cache User Profiles
@@ -48,6 +58,15 @@ class LocalCacheManager(context: Context) {
             if (humid != null) putFloat(KEY_LAST_HUMID, humid) else remove(KEY_LAST_HUMID)
             if (ammonia != null) putFloat(KEY_LAST_AMMONIA, ammonia) else remove(KEY_LAST_AMMONIA)
             if (sound != null) putFloat(KEY_LAST_SOUND, sound) else remove(KEY_LAST_SOUND)
+        }.apply()
+    }
+
+    fun clearCachedTelemetry() {
+        prefs.edit().apply {
+            remove(KEY_LAST_TEMP)
+            remove(KEY_LAST_HUMID)
+            remove(KEY_LAST_AMMONIA)
+            remove(KEY_LAST_SOUND)
         }.apply()
     }
 
@@ -117,7 +136,7 @@ class LocalCacheManager(context: Context) {
         return if (isEmulator()) {
             "http://10.0.2.2:5000/"        // Android Emulator → host machine via virtual router
         } else {
-            "http://10.193.0.78:5000/"     // Physical device (USB/Wi-Fi) → host PC's Wi-Fi IP
+            "http://10.38.77.78:5000/"     // Physical device (Wi-Fi) → host PC's current Wi-Fi IP
         }
     }
 

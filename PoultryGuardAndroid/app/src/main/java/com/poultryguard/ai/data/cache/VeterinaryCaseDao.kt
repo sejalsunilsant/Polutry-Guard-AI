@@ -19,9 +19,18 @@ interface VeterinaryCaseDao {
     @Query("SELECT * FROM veterinary_cases WHERE veterinarianId = :vetId ORDER BY createdAt DESC")
     fun getCasesForVetFlow(vetId: String): Flow<List<VeterinaryCase>>
 
+    @Query("SELECT * FROM veterinary_cases WHERE batchId = :batchId ORDER BY createdAt DESC")
+    fun getCasesForBatchFlow(batchId: String): Flow<List<VeterinaryCase>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(vetCase: VeterinaryCase)
 
     @Update
     suspend fun update(vetCase: VeterinaryCase)
+
+    @Query("DELETE FROM veterinary_cases WHERE batchId = :batchId")
+    suspend fun deleteCasesForBatch(batchId: String)
+
+    @Query("DELETE FROM veterinary_cases")
+    suspend fun deleteAll()
 }

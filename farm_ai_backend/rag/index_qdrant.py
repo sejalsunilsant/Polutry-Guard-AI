@@ -30,12 +30,23 @@ def run_indexing():
         print("Error: No chunks extracted. Verify document text files in data/knowledge_base.")
         return
 
-    print("Connecting to Qdrant Cloud and populating collection...")
-    success = recreate_and_index_collection(chunks)
+    # Build metadata for each chunk: all KB files are global reference documents
+    metadata_list = [
+        {
+            "data_scope": "global",
+            "data_type": "knowledge_base"
+        }
+        for _ in chunks
+    ]
+
+    print("Connecting to Qdrant Cloud and populating collection with ownership metadata...")
+    success = recreate_and_index_collection(chunks, metadata_list=metadata_list)
     
     if success:
         print("==================================================")
         print("Success! Documents are now fully indexed in Qdrant Cloud.")
+        print(f"  - {len(chunks)} chunks indexed with data_scope='global'")
+        print("  - Payload indexes created for ownership filtering")
         print("==================================================")
     else:
         print("==================================================")

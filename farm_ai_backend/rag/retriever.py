@@ -1,14 +1,35 @@
 from sklearn.metrics.pairwise import cosine_similarity
 from .vector_db import load_knowledge_base
-from .qdrant_db import search_knowledge_base
+from .qdrant_db import search_knowledge_base, search_knowledge_base_filtered
 
-def retrieve_relevant_chunks(query, k=3):
+def retrieve_relevant_chunks(query, k=3, farmer_id=None, farm_id=None, batch_id=None):
     """
-    Search the indexed knowledge chunks using Qdrant Cloud (vector search),
-    falling back to TF-IDF if unconfigured or offline.
+    Search the indexed knowledge chunks using Qdrant Cloud (vector search) with
+    ownership-based metadata filtering, falling back to TF-IDF if unconfigured or offline.
+    
+    Args:
+        query: The user's question text.
+        k: Number of top chunks to retrieve.
+        farmer_id: Verified farmer profile UUID (server-side authenticated).
+        farm_id: Verified farm_id belonging to this farmer.
+        batch_id: Verified batch_id belonging to this farm.
+    
+    Returns:
+        list of str: Retrieved knowledge chunks.
     """
-    # 1. Try Qdrant Cloud vector database
-    qdrant_chunks = search_knowledge_base(query, k=k)
+    # 1. Try Qdrant Cloud with ownership filtering
+    if farmer_id or farm_id or batch_id:
+        qdrant_chunks = search_knowledge_base_filtered(
+            query, 
+            farmer_id=farmer_id, 
+            farm_id=farm_id, 
+            batch_id=batch_id, 
+            k=k
+        )
+    else:
+        # No ownership context — search globally (backward compatible)
+        qdrant_chunks = search_knowledge_base(query, k=k)
+    
     if qdrant_chunks is not None:
         if len(qdrant_chunks) > 0:
             print(f"[RAG Retriever] Successfully retrieved {len(qdrant_chunks)} chunks from Qdrant Cloud.")

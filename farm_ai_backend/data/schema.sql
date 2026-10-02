@@ -258,10 +258,14 @@ CREATE TABLE IF NOT EXISTS profiles (
     name VARCHAR(100) NOT NULL,
     email VARCHAR(100) UNIQUE NOT NULL,
     role VARCHAR(50) DEFAULT 'FARMER' REFERENCES roles(name),
+    fcm_token TEXT,
     join_date TIMESTAMPTZ DEFAULT now() NOT NULL,
     approval_status VARCHAR(20) DEFAULT 'PENDING_APPROVAL' CHECK (approval_status IN ('PENDING_APPROVAL', 'APPROVED', 'REJECTED')),
     rejection_reason TEXT
 );
+
+-- Profiles FCM token migration
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS fcm_token TEXT;
 
 -- Seed initial roles
 INSERT INTO roles (name) VALUES 

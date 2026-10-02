@@ -31,5 +31,3 @@ data class HardwareKit(
     val thingspeakChannelId: String = "",
     val thingspeakReadApiKey: String = ""
 )
-
-
