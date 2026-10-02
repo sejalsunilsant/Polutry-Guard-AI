@@ -136,8 +136,6 @@ def assign_kit():
 def list_kits():
     """
     Fetch all registered device kits from Supabase for the admin panel.
-    thingspeak_write_api_key is NEVER returned.
-    thingspeak_read_api_key is included — admin needs it to verify ThingSpeak setup.
     """
     try:
         from data.supabase_client import get_all_kits

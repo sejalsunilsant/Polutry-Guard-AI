@@ -5,7 +5,6 @@ import android.util.Log
 import org.eclipse.paho.client.mqttv3.*
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import java.util.UUID
-import kotlin.concurrent.fixedRateTimer
 
 class MqttManager(
     private val context: Context,
@@ -16,7 +15,6 @@ class MqttManager(
 ) {
     private var mqttClient: MqttAsyncClient? = null
     private var isConnected = false
-    private var fallbackTimer: java.util.Timer? = null
 
     // Standard MQTT topics matching farm nodes
     companion object {
@@ -47,9 +45,6 @@ class MqttManager(
                     isConnected = true
                     onConnectionStateChanged(true)
                     Log.d("PoultryGuardMqtt", "MQTT Connected successfully to: $brokerUrl")
-                    
-                    // Start simulated telemetry feed by default, cancel it only on actual broker messages
-                    startSimulatedMqttFeed()
 
                     // Subscribe to all hardware nodes
                     subscribeToTopic(TOPIC_TEMP)
@@ -61,8 +56,7 @@ class MqttManager(
                 override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
                     isConnected = false
                     onConnectionStateChanged(false)
-                    Log.w("PoultryGuardMqtt", "MQTT Broker connection failed: ${exception?.localizedMessage}. Launching local simulator feed.")
-                    startSimulatedMqttFeed()
+                    Log.w("PoultryGuardMqtt", "MQTT Broker connection failed: ${exception?.localizedMessage}")
                 }
             })
 
@@ -70,8 +64,7 @@ class MqttManager(
                 override fun connectionLost(cause: Throwable?) {
                     isConnected = false
                     onConnectionStateChanged(false)
-                    Log.w("PoultryGuardMqtt", "MQTT connection lost: ${cause?.localizedMessage}. Fallback engaged.")
-                    startSimulatedMqttFeed()
+                    Log.w("PoultryGuardMqtt", "MQTT connection lost: ${cause?.localizedMessage}")
                 }
 
                 override fun messageArrived(topic: String?, message: MqttMessage?) {
@@ -84,12 +77,6 @@ class MqttManager(
                             
                             val floatVal = payload.toFloatOrNull()
                             if (floatVal != null) {
-                                // Stop simulator feed if running, since real telemetry has arrived
-                                if (fallbackTimer != null) {
-                                    Log.d("PoultryGuardMqtt", "Real message received on $topic. Canceling simulation feed.")
-                                    fallbackTimer?.cancel()
-                                    fallbackTimer = null
-                                }
                                 onReadingReceived(topic, floatVal)
                             }
                         } catch (e: Exception) {
@@ -103,7 +90,6 @@ class MqttManager(
 
         } catch (e: Exception) {
             Log.e("PoultryGuardMqtt", "MQTT setup error: ${e.localizedMessage}")
-            startSimulatedMqttFeed()
         }
     }
 
@@ -123,41 +109,11 @@ class MqttManager(
         }
     }
 
-    // High fidelity offline fallback to feed MQTT subscribers
-    private fun startSimulatedMqttFeed() {
-        if (fallbackTimer != null) return
-
-        var simTemp = 24.2f
-        var simHumid = 61.5f
-        var simAmmonia = 12.0f
-        var simSound = 54.0f
-
-        fallbackTimer = fixedRateTimer("mqtt_sim", daemon = true, initialDelay = 1000L, period = 4000L) {
-            simTemp += (kotlin.random.Random.nextFloat() - 0.5f) * 0.3f
-            simHumid += (kotlin.random.Random.nextFloat() - 0.5f) * 0.6f
-            simAmmonia += (kotlin.random.Random.nextFloat() - 0.5f) * 0.4f
-            simSound += (kotlin.random.Random.nextFloat() - 0.5f) * 1.2f
-
-            simTemp = simTemp.coerceIn(19f, 32f)
-            simHumid = simHumid.coerceIn(45f, 85f)
-            simAmmonia = simAmmonia.coerceIn(4f, 35f)
-            simSound = simSound.coerceIn(40f, 90f)
-
-            // Direct callbacks to simulate broker broadcasts
-            onReadingReceived(TOPIC_TEMP, simTemp)
-            onReadingReceived(TOPIC_HUMID, simHumid)
-            onReadingReceived(TOPIC_AMMONIA, simAmmonia)
-            onReadingReceived(TOPIC_SOUND, simSound)
-        }
-    }
-
     fun isBrokerConnected(): Boolean {
         return isConnected
     }
 
     fun disconnect() {
-        fallbackTimer?.cancel()
-        fallbackTimer = null
         try {
             mqttClient?.disconnect()
         } catch (e: Exception) {

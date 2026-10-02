@@ -2,29 +2,23 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta, date, timezone
-
-# Load env variables manually from .env (just like app.py does)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-env_path = os.path.abspath(os.path.join(BASE_DIR, "..", ".env"))
-print(f"[Scheduler Env] Checking for .env at: {env_path}")
-if os.path.exists(env_path):
-    print(f"[Scheduler Env] .env found, parsing...")
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, val = line.split("=", 1)
-                os.environ[key.strip()] = val.strip()
-                print(f"[Scheduler Env] Loaded: {key.strip()}")
-else:
-    print(f"[Scheduler Env] WARNING: .env not found at {env_path}!")
-
 import threading
 from services.thingspeak_service import ThingSpeakService
 from data.supabase_client import (
     save_telemetry, get_devices_with_thingspeak, get_last_telemetry,
     supabase, safe_cleanup_telemetry
 )
+
+# Load env variables manually from .env (just like app.py does)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.abspath(os.path.join(BASE_DIR, "..", ".env"))
+if os.path.exists(env_path):
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                os.environ[key.strip()] = val.strip()
 
 def clean_and_parse_ts(ts_str):
     if not ts_str:

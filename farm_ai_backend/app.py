@@ -33,6 +33,12 @@ CORS(app)  # Enable CORS for local emulator API queries
 # Pre-load all machine learning models into memory at application startup
 ModelManager.initialize_all_models()
 
+# Start background watcher for automatic Supabase storage image detection & prediction
+from services.image_pipeline_service import ImagePipelineService
+if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+    ImagePipelineService.start_background_watcher(interval_seconds=15)
+
+
 # Register Blueprints for modular routes
 app.register_blueprint(prediction_bp)
 app.register_blueprint(chatbot_bp)

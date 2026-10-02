@@ -14,4 +14,5 @@ requests
 tensorflow-cpu; sys_platform == 'win32' or sys_platform == 'linux'
 tensorflow; sys_platform == 'darwin'
 cryptography
+firebase-admin>=6.2.0
 

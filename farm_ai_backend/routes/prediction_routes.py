@@ -454,18 +454,9 @@ def guardian_predict_endpoint():
                 sound_file.save(temp_path)
             
             try:
-                waveform, sr = preprocess_audio(temp_path)
-                if is_valid_sound_clip(waveform, sr):
-                    mel = librosa.feature.melspectrogram(y=waveform, sr=sr, n_mels=128)
-                    log_mel = librosa.power_to_db(mel)
-                    if log_mel.shape[1] < 173:
-                        pad = 173 - log_mel.shape[1]
-                        log_mel = np.pad(log_mel, ((0, 0), (0, pad)))
-                    else:
-                        log_mel = log_mel[:, :173]
-                    sound_pred = ModelManager.predict_sound(log_mel)
+                sound_pred = ModelManager.predict_sound(temp_path)
             except Exception as se:
-                print(f"[Prediction API] Sound preprocessing failed: {se}")
+                print(f"[Prediction API] Sound prediction failed: {se}")
             finally:
                 # Cleanup temp sound file
                 try:
@@ -637,4 +628,43 @@ def guardian_predict_endpoint():
     except Exception as e:
         print(f"[Prediction API] Guardian prediction error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@prediction_bp.route('/ml/sync-images', methods=['POST'])
+def sync_unprocessed_images_endpoint():
+    """
+    Manually triggers backlog processing for all unpredicted images in Supabase Storage.
+    """
+    try:
+        from services.image_pipeline_service import ImagePipelineService
+        results = ImagePipelineService.process_all_unprocessed_images()
+        return jsonify({
+            "status": "success",
+            "processed_count": len(results),
+            "results": results
+        }), 200
+    except Exception as e:
+        print(f"[Prediction API] Image sync error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@prediction_bp.route('/ml/process-image', methods=['POST'])
+def process_single_storage_image_endpoint():
+    """
+    Webhook endpoint callable when a new file is uploaded to Supabase Storage.
+    Payload: {"name": "farm_a/shed_1_cam/image_20261002.jpg"} or {"record": {"name": "..."}}
+    """
+    try:
+        data = request.get_json() or {}
+        file_path = data.get("name") or data.get("record", {}).get("name") or data.get("filePath")
+        if not file_path:
+            return jsonify({"status": "error", "message": "File path 'name' is required"}), 400
+
+        from services.image_pipeline_service import ImagePipelineService
+        res = ImagePipelineService.process_single_image(file_path)
+        return jsonify(res), 200
+    except Exception as e:
+        print(f"[Prediction API] Process single image error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 

@@ -46,7 +46,9 @@ interface AuthRepository {
     suspend fun syncAllKits(): Result<List<com.poultryguard.ai.data.model.HardwareKit>>
     suspend fun fetchUserContext(profileId: String): Result<com.poultryguard.ai.data.api.UserContextDto>
     suspend fun configureWifi(deviceId: String, ssid: String, password: String): Result<Unit>
+    suspend fun updateFcmToken(fcmToken: String): Result<Boolean>
 }
+
 
 class SupabaseAuthRepository(private val context: Context) : AuthRepository {
 
@@ -311,8 +313,6 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                         farmerId = dto.farmerId ?: "",
                         serialNumber = dto.serialNumber ?: "",
                         firmwareVersion = dto.firmwareVersion ?: "",
-                        thingspeakChannelId = dto.thingspeakChannelId ?: "",
-                        thingspeakReadApiKey = dto.thingspeakReadApiKey ?: "",
                         lifecycleStatus = dto.lifecycleStatus ?: (if (!dto.farmId.isNullOrBlank()) "Active" else "Available"),
                         isProvisioned = !dto.farmId.isNullOrBlank(),
                         isActive = !dto.farmId.isNullOrBlank(),
@@ -467,6 +467,28 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                 Result.success(Unit)
             } else {
                 Result.failure(Exception(response.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateFcmToken(fcmToken: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            cacheManager.saveFcmToken(fcmToken)
+            val cachedUser = cacheManager.getCachedUserProfile()
+            val profileId = cachedUser?.uid
+            if (profileId.isNullOrBlank()) {
+                return@withContext Result.success(true)
+            }
+            val api = getAuthApi() ?: return@withContext Result.success(true)
+            val response = api.updateFcmToken(
+                com.poultryguard.ai.data.api.UpdateFcmTokenRequest(profileId = profileId, fcmToken = fcmToken)
+            )
+            if (response.status == "success") {
+                Result.success(true)
+            } else {
+                Result.failure(Exception(response.message ?: "Failed to sync FCM token"))
             }
         } catch (e: Exception) {
             Result.failure(e)

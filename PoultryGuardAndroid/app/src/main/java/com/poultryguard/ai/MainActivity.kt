@@ -56,9 +56,37 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.*
 
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Initialize FCM Notification Channel
+        com.poultryguard.ai.data.service.PoultryGuardFirebaseMessagingService.createNotificationChannel(applicationContext)
+
+        // Retrieve and sync FCM device registration token
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                if (task.isSuccessful && !task.result.isNullOrBlank()) {
+                    val token = task.result
+                    val cacheManager = com.poultryguard.ai.data.cache.LocalCacheManager(applicationContext)
+                    cacheManager.saveFcmToken(token)
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        try {
+                            com.poultryguard.ai.data.repository.SupabaseAuthRepository(applicationContext).updateFcmToken(token)
+                        } catch (e: Exception) {
+                            // Non-blocking background sync
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Graceful fallback if Firebase credentials are initializing
+        }
+
         setContent {
             val db = remember { com.poultryguard.ai.data.cache.AppDatabase.getDatabase(applicationContext) }
             val vetRepository = remember { com.poultryguard.ai.data.repository.VetRepository(applicationContext) }

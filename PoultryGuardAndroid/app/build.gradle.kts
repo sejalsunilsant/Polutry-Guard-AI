@@ -4,6 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("kotlin-kapt")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -120,4 +121,10 @@ dependencies {
 
     // ZXing for QR Code generation
     implementation("com.google.zxing:core:3.5.3")
+
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-messaging")
 }
+

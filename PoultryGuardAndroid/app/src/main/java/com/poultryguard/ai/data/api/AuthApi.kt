@@ -127,8 +127,8 @@ data class UserContextDto(
     @SerializedName("farmName") val farmName: String?,
     @SerializedName("deviceId") val deviceId: String?,
     @SerializedName("deviceName") val deviceName: String?,
-    @SerializedName("thingspeakChannelId") val thingspeakChannelId: String?,
-    @SerializedName("thingspeakReadApiKey") val thingspeakReadApiKey: String?,
+    @SerializedName("thingspeakChannelId") val thingspeakChannelId: String? = null,
+    @SerializedName("thingspeakReadApiKey") val thingspeakReadApiKey: String? = null,
     @SerializedName("wifiSsid") val wifiSsid: String?,
     @SerializedName("phone") val phone: String? = null,
     @SerializedName("location") val location: String? = null,
@@ -145,8 +145,6 @@ data class UserContextDto(
 
 /**
  * Request body for POST /admin/kits.
- * The thingspeakWriteApiKey is sent to the backend but NEVER stored in any
- * client-side model — it stays server-side only.
  */
 data class CreateKitRequest(
     @SerializedName("deviceId") val deviceId: String,
@@ -179,9 +177,9 @@ data class KitDto(
     @SerializedName("farmer_name") val farmerName: String? = null,
     @SerializedName("serial_number") val serialNumber: String? = null,
     @SerializedName("firmware_version") val firmwareVersion: String? = null,
-    @SerializedName("lifecycle_status") val lifecycleStatus: String? = null,
-    @SerializedName("thingspeak_channel_id") val thingspeakChannelId: String?,
+    @SerializedName("thingspeak_channel_id") val thingspeakChannelId: String? = null,
     @SerializedName("thingspeak_read_api_key") val thingspeakReadApiKey: String? = null,
+    @SerializedName("lifecycle_status") val lifecycleStatus: String? = null,
     @SerializedName("last_seen_at") val lastSeenAt: String? = null,
     @SerializedName("created_at") val createdAt: String? = null
 )
@@ -292,7 +290,17 @@ interface AuthApi {
         @retrofit2.http.Path("case_id") caseId: String,
         @Body body: UpdateCaseRequest
     ): SimpleApiResponse
+
+    @POST("users/fcm-token")
+    suspend fun updateFcmToken(
+        @Body body: UpdateFcmTokenRequest
+    ): SimpleApiResponse
 }
+
+data class UpdateFcmTokenRequest(
+    @SerializedName("profileId") val profileId: String,
+    @SerializedName("fcmToken") val fcmToken: String
+)
 
 data class ConfigureWifiRequest(
     @SerializedName("deviceId") val deviceId: String,

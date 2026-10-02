@@ -383,6 +383,29 @@ def get_user_context(profile_id):
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@user_bp.route('/users/fcm-token', methods=['POST'])
+def api_update_fcm_token():
+    """
+    Register or refresh a device's Firebase Cloud Messaging token for a user.
+    """
+    try:
+        data = request.get_json() or {}
+        profile_id = data.get('profileId') or data.get('profile_id')
+        fcm_token = data.get('fcmToken') or data.get('fcm_token')
+
+        if not profile_id or not fcm_token:
+            return jsonify({'status': 'error', 'message': 'profileId and fcmToken are required fields'}), 400
+
+        from data.supabase_client import update_user_fcm_token
+        success = update_user_fcm_token(str(profile_id), str(fcm_token))
+        if success:
+            return jsonify({'status': 'success', 'message': 'FCM device token registered successfully'}), 200
+        return jsonify({'status': 'error', 'message': 'Failed to update FCM token'}), 400
+    except Exception as e:
+        print(f"[User API] Error updating FCM token: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 # API endpoints for alerts and cases
 @user_bp.route("/health-alerts", methods=["GET"])
 @user_bp.route("/alerts", methods=["GET"])
