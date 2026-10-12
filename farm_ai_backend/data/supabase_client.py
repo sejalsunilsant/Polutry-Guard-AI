@@ -1765,17 +1765,6 @@ def check_telemetry_thresholds_and_notify(device_id, temperature, humidity, ammo
                     batch_id=batch_id,
                     current_value=snd
                 )
-                try:
-                    from services.sms_service import SMSService
-                    SMSService.send_alert_sms_for_farm(
-                        farm_id=farm_id,
-                        device_id=device_id or "all_devices",
-                        alert_type="SOUND",
-                        severity="WARNING",
-                        message=f"Abnormal sound level ({snd:.1f} dB) detected in shed."
-                    )
-                except Exception:
-                    pass
             elif snd <= 60.0:
                 cooldown_tracker.reset_alert(farm_id, device_id, "SOUND")
     except Exception as e:
