@@ -84,6 +84,9 @@ dependencies {
     // MapLibre Native Android SDK for map rendering with OSM tiles
     implementation("org.maplibre.gl:android-sdk:11.5.2")
 
+    // Google Play Services Location for high-accuracy GPS & Geocoding
+    implementation("com.google.android.gms:play-services-location:21.2.0")
+
 
 
     // Network & REST API Integration
