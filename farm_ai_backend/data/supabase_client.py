@@ -255,6 +255,11 @@ def save_telemetry(device_id, temperature, humidity, ammonia, sound_level, farm_
                 file_ext = image_url.split("/")[-1].split(".")[-1].split("?")[0]
             file_name = f"{device_id}_{ts_str}.{file_ext}"
             data["image_url"] = upload_media_from_url(image_url, "poultry-media", "images", file_name)
+            try:
+                from services.image_pipeline_service import ImagePipelineService
+                ImagePipelineService.mark_file_handled(f"images/{file_name}", data["image_url"])
+            except Exception:
+                pass
             
         if created_at is not None:
             data["created_at"] = created_at
@@ -2713,5 +2718,285 @@ def update_case(case_id, veterinarian_id, status, diagnosis, recommendation, tre
     except Exception as e:
         print(f"[Supabase Error] update_case failed: {e}")
         return False
+
+
+# -----------------------------------------------------------------------------
+# Image Prediction Status & Database-Level Idempotency
+# -----------------------------------------------------------------------------
+from datetime import datetime, timezone
+
+_mock_image_processing_status = {}
+IMAGE_STATUS_TABLE = os.environ.get("IMAGE_STATUS_TABLE", "image_processing_status")
+IMAGE_PROCESSING_TIMEOUT_SEC = int(os.environ.get("IMAGE_PROCESSING_TIMEOUT_SEC", "300"))
+
+
+def get_image_prediction_status(image_path, image_url=None):
+    """
+    Check if an image has already been predicted in the Supabase database.
+    Checks in-memory cache, image_processing_status table, and fallback sensor_telemetry/disease_events.
+    Returns:
+        dict with status info if already processed or processing, None if unprocessed.
+    """
+    clean_path = str(image_path).strip() if image_path else None
+    clean_url = str(image_url).strip() if image_url else None
+
+    # Check in-memory status cache first
+    if clean_path and clean_path in _mock_image_processing_status:
+        return _mock_image_processing_status[clean_path]
+    if clean_url and clean_url in _mock_image_processing_status:
+        return _mock_image_processing_status[clean_url]
+
+    if not supabase:
+        return None
+
+    try:
+        # 1. Primary Check: image_processing_status table
+        query = supabase.table(IMAGE_STATUS_TABLE).select("*")
+        if clean_path and clean_url:
+            query = query.or_(f"image_path.eq.{clean_path},image_url.eq.{clean_url}")
+        elif clean_path:
+            query = query.eq("image_path", clean_path)
+        elif clean_url:
+            query = query.eq("image_url", clean_url)
+        else:
+            return None
+
+        res = query.limit(1).execute()
+        if res.data and len(res.data) > 0:
+            row = res.data[0]
+            if clean_path:
+                _mock_image_processing_status[clean_path] = row
+            if clean_url:
+                _mock_image_processing_status[clean_url] = row
+            return row
+    except Exception as e:
+        # Table might not exist yet; fall back to telemetry/events check
+        pass
+
+    try:
+        # 2. Secondary Fallback Check: sensor_telemetry table
+        if clean_url or clean_path:
+            tel_query = supabase.table("sensor_telemetry").select("id, created_at, image_url")
+            if clean_url:
+                tel_query = tel_query.or_(f"image_url.eq.{clean_url},image_url.ilike.%{clean_path}%")
+            else:
+                tel_query = tel_query.ilike("image_url", f"%{clean_path}%")
+
+            tel_res = tel_query.limit(1).execute()
+            if tel_res.data and len(tel_res.data) > 0:
+                tel_id = tel_res.data[0].get("id")
+                pred_res = supabase.table("disease_predictions")\
+                    .select("id, disease, risk_level, confidence")\
+                    .eq("telemetry_id", tel_id)\
+                    .limit(1)\
+                    .execute()
+                if pred_res.data and len(pred_res.data) > 0:
+                    p = pred_res.data[0]
+                    result_rec = {
+                        "image_path": clean_path,
+                        "image_url": clean_url,
+                        "status": "COMPLETED",
+                        "disease": p.get("disease"),
+                        "risk_level": p.get("risk_level"),
+                        "confidence": float(p.get("confidence", 0.0)),
+                        "telemetry_id": tel_id,
+                        "prediction_id": p.get("id")
+                    }
+                    if clean_path:
+                        _mock_image_processing_status[clean_path] = result_rec
+                    return result_rec
+
+        # 3. Tertiary Fallback Check: disease_events table
+        if clean_url or clean_path:
+            ev_query = supabase.table("disease_events").select("id, disease, risk_level, max_confidence")
+            if clean_url:
+                ev_query = ev_query.or_(f"representative_image_url.eq.{clean_url},representative_image_url.ilike.%{clean_path}%")
+            else:
+                ev_query = ev_query.ilike("representative_image_url", f"%{clean_path}%")
+
+            ev_res = ev_query.limit(1).execute()
+            if ev_res.data and len(ev_res.data) > 0:
+                ev = ev_res.data[0]
+                result_rec = {
+                    "image_path": clean_path,
+                    "image_url": clean_url,
+                    "status": "COMPLETED",
+                    "disease": ev.get("disease"),
+                    "risk_level": ev.get("risk_level"),
+                    "confidence": float(ev.get("max_confidence", 0.0)),
+                    "event_id": ev.get("id")
+                }
+                if clean_path:
+                    _mock_image_processing_status[clean_path] = result_rec
+                return result_rec
+    except Exception as e:
+        print(f"[Supabase Status] Note during fallback status check: {e}")
+
+    return None
+
+
+def claim_image_for_processing(image_path, image_url=None, device_id=None, farm_id=None, timeout_seconds=None):
+    """
+    Database-level idempotency lock:
+    Attempts to atomically claim an image for processing.
+    Returns:
+        (claimed: bool, existing_record: dict | None)
+        - If claimed is True: Worker may proceed with model inference.
+        - If claimed is False: Image is already processed or being processed; caller MUST skip.
+    """
+    if not image_path:
+        return False, None
+
+    clean_path = str(image_path).strip()
+    timeout = timeout_seconds or IMAGE_PROCESSING_TIMEOUT_SEC
+
+    # Step 1: Check existing status in memory or DB
+    existing = get_image_prediction_status(clean_path, image_url)
+    if existing:
+        status = str(existing.get("status", "")).upper()
+        if status == "COMPLETED":
+            return False, existing
+        if status == "PROCESSING":
+            # Check for stale lease / timeout
+            updated_at_str = existing.get("updated_at")
+            if updated_at_str:
+                try:
+                    up_dt = clean_and_parse_ts(updated_at_str)
+                    if (datetime.now(timezone.utc) - up_dt).total_seconds() < timeout:
+                        return False, existing
+                except Exception:
+                    return False, existing
+
+    # Step 2: Atomic Reservation (register in-memory lock first)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    claim_rec = {
+        "image_path": clean_path,
+        "image_url": image_url,
+        "status": "PROCESSING",
+        "device_id": device_id,
+        "farm_id": farm_id,
+        "created_at": now_iso,
+        "updated_at": now_iso
+    }
+    _mock_image_processing_status[clean_path] = claim_rec
+    if image_url:
+        _mock_image_processing_status[image_url] = claim_rec
+
+    # Step 3: Attempt atomic reservation in DB
+    if supabase:
+        try:
+            supabase.table(IMAGE_STATUS_TABLE).upsert({
+                "image_path": clean_path,
+                "image_url": image_url,
+                "status": "PROCESSING",
+                "device_id": device_id,
+                "farm_id": farm_id,
+                "updated_at": now_iso
+            }).execute()
+        except Exception as e:
+            # Table might not exist yet; in-memory lock is active
+            pass
+
+    return True, None
+
+
+def save_image_prediction_status(
+    image_path,
+    status="COMPLETED",
+    image_url=None,
+    disease=None,
+    confidence=None,
+    risk_level=None,
+    device_id=None,
+    farm_id=None,
+    telemetry_id=None,
+    prediction_id=None,
+    event_id=None,
+    error_message=None
+):
+    """
+    Persist the final status of an image prediction in Supabase for long-term idempotency.
+    """
+    if not image_path:
+        return {"status": "error", "message": "image_path required"}
+
+    clean_path = str(image_path).strip()
+    now_str = datetime.now(timezone.utc).isoformat()
+    data = {
+        "image_path": clean_path,
+        "image_url": image_url,
+        "status": status,
+        "disease": disease,
+        "confidence": float(confidence) if confidence is not None else None,
+        "risk_level": risk_level,
+        "device_id": device_id,
+        "farm_id": farm_id,
+        "telemetry_id": telemetry_id,
+        "prediction_id": prediction_id,
+        "event_id": event_id,
+        "error_message": str(error_message) if error_message else None,
+        "updated_at": now_str
+    }
+
+    _mock_image_processing_status[clean_path] = data
+    if image_url:
+        _mock_image_processing_status[image_url] = data
+
+    if not supabase:
+        return {"status": "success", "data": data}
+
+    try:
+        res = supabase.table(IMAGE_STATUS_TABLE).upsert(data).execute()
+        return {"status": "success", "data": res.data}
+    except Exception as e:
+        print(f"[Supabase Status] Note persisting status to '{IMAGE_STATUS_TABLE}': {e}")
+        return {"status": "fallback", "message": str(e), "data": data}
+
+
+def get_all_completed_image_paths():
+    """
+    Fetch all completed image paths in one query to quickly seed baseline caches.
+    """
+    paths = set()
+    for k, v in _mock_image_processing_status.items():
+        if isinstance(v, dict) and str(v.get("status", "")).upper() == "COMPLETED":
+            if v.get("image_path"):
+                paths.add(v["image_path"])
+            if v.get("image_url"):
+                paths.add(v["image_url"])
+
+    if supabase:
+        try:
+            res = supabase.table(IMAGE_STATUS_TABLE)\
+                .select("image_path, image_url")\
+                .eq("status", "COMPLETED")\
+                .execute()
+            if res.data:
+                for row in res.data:
+                    if row.get("image_path"):
+                        paths.add(row["image_path"])
+                    if row.get("image_url"):
+                        paths.add(row["image_url"])
+        except Exception:
+            pass
+
+        try:
+            # Also include any image_url already recorded in sensor_telemetry
+            tel_res = supabase.table("sensor_telemetry")\
+                .select("image_url")\
+                .not_.is_("image_url", "null")\
+                .limit(1000)\
+                .execute()
+            if tel_res.data:
+                for row in tel_res.data:
+                    img = row.get("image_url")
+                    if img:
+                        paths.add(img)
+        except Exception:
+            pass
+
+    return list(paths)
+
+
 
 
