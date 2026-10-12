@@ -43,19 +43,14 @@ from ml.manager import ModelManager
 app = Flask(__name__)
 CORS(app)  # Enable CORS for local emulator API queries
 
-# Asynchronously initialize models and background tasks to prevent blocking WSGI startup and health checks
+# Asynchronously initialize background tasks to prevent blocking WSGI startup and health checks
 import threading
 
 def _initialize_async_services():
     try:
-        ModelManager.initialize_all_models()
-    except Exception as e:
-        print(f"[Async Startup] Error loading models: {e}")
-
-    try:
         from services.image_pipeline_service import ImagePipelineService
         if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
-            ImagePipelineService.start_background_watcher(interval_seconds=15)
+            ImagePipelineService.start_background_watcher(interval_seconds=30)
     except Exception as e:
         print(f"[Async Startup] Error starting background watcher: {e}")
 

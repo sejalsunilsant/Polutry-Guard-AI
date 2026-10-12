@@ -387,5 +387,8 @@ class ImagePipelineService:
                     results.append(res)
             except Exception as e:
                 print(f"[Image Pipeline] Error processing image '{img_path}': {e}")
+            finally:
+                import gc
+                gc.collect()
 
         return results

@@ -8,7 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TF_ENABLE_ONEDNN_OPTS=0 \
     PORT=10000 \
-    HOST=0.0.0.0
+    HOST=0.0.0.0 \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    VECLIB_MAXIMUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
+    TORCH_NUM_THREADS=1
 
 # Install system dependencies for audio processing, network queries, and health checks
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -42,5 +48,5 @@ EXPOSE 10000 5000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:${PORT:-10000}/health || exit 1
 
-# Launch with Gunicorn production WSGI server dynamically binding to Render's PORT
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-10000} --workers 1 --threads 4 --timeout 120 app:app"]
+# Launch with Gunicorn production WSGI server: 1 worker and 2 threads for strict Render memory limit compliance
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-10000} --workers 1 --threads 2 --timeout 120 app:app"]

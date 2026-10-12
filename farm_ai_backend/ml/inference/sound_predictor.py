@@ -1,4 +1,5 @@
 import os
+import threading
 import numpy as np
 from services.audio_predictor import predict_flock_sound, get_audio_predictor
 
@@ -9,20 +10,30 @@ class SoundPredictor:
     """
     _mode = "yamnet_xgboost"
     _labels = ["Healthy", "Sick"]
+    _lock = threading.Lock()
+    _initialized = False
 
     @classmethod
     def load_model(cls):
         """
-        Initializes and preloads the AudioPredictor model.
+        Initializes and preloads the AudioPredictor model lazily (thread-safe singleton).
         """
-        try:
-            predictor = get_audio_predictor()
-            cls._mode = "yamnet_xgboost"
+        if cls._initialized:
             return cls._mode
-        except Exception as e:
-            print(f"[Sound Predictor] Model preload warning: {e}")
-            cls._mode = "fallback"
-            return cls._mode
+
+        with cls._lock:
+            if cls._initialized:
+                return cls._mode
+
+            try:
+                predictor = get_audio_predictor()
+                cls._mode = "yamnet_xgboost"
+                cls._initialized = True
+                return cls._mode
+            except Exception as e:
+                print(f"[Sound Predictor] Model preload warning: {e}")
+                cls._mode = "fallback"
+                return cls._mode
 
     @classmethod
     def predict(cls, audio_input, confidence_threshold=0.5):

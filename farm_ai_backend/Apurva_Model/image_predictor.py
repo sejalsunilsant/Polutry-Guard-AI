@@ -91,31 +91,59 @@ def load_class_mapping() -> Tuple[Dict[str, int], Dict[int, str]]:
     return {name: idx for idx, name in RAW_INDEX_TO_CLASS.items()}, dict(RAW_INDEX_TO_CLASS)
 
 
-@lru_cache(maxsize=1)
+import threading
+import gc
+
+_IMAGE_MODEL_LOCK = threading.Lock()
+_CACHED_IMAGE_MODEL = None
+
 def load_image_model() -> Tuple[torch.nn.Module, Dict[int, str], torch.device]:
-    """Load and cache the trained 3-class ResNet18 model."""
-    checkpoint_path = get_model_path()
-    _, idx_to_class = load_class_mapping()
-    num_classes = len(idx_to_class)
+    """Load and cache the trained 3-class ResNet18 model (thread-safe singleton with low memory overhead)."""
+    global _CACHED_IMAGE_MODEL
+    if _CACHED_IMAGE_MODEL is not None:
+        return _CACHED_IMAGE_MODEL
 
-    device = get_device(prefer_gpu=True)
-    model = get_resnet18_model(num_classes=num_classes, pretrained=False)
+    with _IMAGE_MODEL_LOCK:
+        if _CACHED_IMAGE_MODEL is not None:
+            return _CACHED_IMAGE_MODEL
 
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        # Constrain CPU threads to prevent memory explosion on shared cloud containers
+        try:
+            torch.set_num_threads(1)
+        except Exception:
+            pass
 
-    if isinstance(checkpoint, dict):
-        state_dict = checkpoint.get("state_dict", checkpoint.get("model_state_dict", checkpoint))
-    else:
-        state_dict = checkpoint
+        checkpoint_path = get_model_path()
+        _, idx_to_class = load_class_mapping()
+        num_classes = len(idx_to_class)
 
-    if not isinstance(state_dict, dict):
-        raise ValueError("Invalid ResNet18 checkpoint: expected state_dict.")
+        device = get_device(prefer_gpu=False)  # Prioritize CPU on standard Render container
+        model = get_resnet18_model(num_classes=num_classes, pretrained=False)
 
-    model.load_state_dict(state_dict)
-    model = model.to(device)
-    model.eval()
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
-    return model, idx_to_class, device
+        if isinstance(checkpoint, dict):
+            state_dict = checkpoint.get("state_dict", checkpoint.get("model_state_dict", checkpoint))
+        else:
+            state_dict = checkpoint
+
+        if not isinstance(state_dict, dict):
+            raise ValueError("Invalid ResNet18 checkpoint: expected state_dict.")
+
+        model.load_state_dict(state_dict)
+        model = model.to(device)
+        model.eval()
+
+        # Disable autograd gradients across all weights to save memory
+        for param in model.parameters():
+            param.requires_grad = False
+
+        # Free temporary checkpoint object from memory immediately
+        del checkpoint, state_dict
+        gc.collect()
+
+        _CACHED_IMAGE_MODEL = (model, idx_to_class, device)
+        return _CACHED_IMAGE_MODEL
 
 
 def _load_and_validate_image(image_input: Union[str, Path, BinaryIO, bytes, Image.Image, np.ndarray]) -> Image.Image:
@@ -174,9 +202,13 @@ def predict_image(
 
     tensor = transform_image(image, target_size=IMAGE_SIZE).unsqueeze(0).to(device)
 
-    with torch.no_grad():
+    # Use CPU-efficient inference mode (lower peak memory than no_grad)
+    with torch.inference_mode():
         logits = model(tensor)
         probabilities = torch.softmax(logits, dim=1).squeeze(0).cpu().tolist()
+
+    # Free tensor memory immediately
+    del tensor, logits
 
     prob_map = {idx_to_class[i]: float(probabilities[i]) for i in range(len(probabilities))}
 

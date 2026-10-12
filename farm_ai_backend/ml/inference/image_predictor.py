@@ -12,7 +12,10 @@ from Apurva_Model.image_predictor import (
 )
 
 
+import threading
+
 class ImagePredictor:
+    _lock = threading.Lock()
     _model = None
     _idx_to_class = None
     _device = None
@@ -21,21 +24,25 @@ class ImagePredictor:
     @classmethod
     def load_model(cls):
         """
-        Loads the Apurva ResNet18 PyTorch model once (Singleton).
+        Loads the Apurva ResNet18 PyTorch model lazily once (thread-safe singleton).
         """
         if cls._model is not None:
             return "pytorch"
 
-        try:
-            print("[Image Predictor] Loading Apurva ResNet18 PyTorch model...")
-            cls._model, cls._idx_to_class, cls._device = load_image_model()
-            cls._classes = list(CANONICAL_CNN_CLASSES)
-            print(f"[Image Predictor] Apurva ResNet18 loaded successfully on {cls._device}")
-            return "pytorch"
-        except Exception as e:
-            print(f"[Image Predictor] Error loading Apurva ResNet18 model: {e}. Fallback enabled.")
-            cls._model = None
-            return "fallback"
+        with cls._lock:
+            if cls._model is not None:
+                return "pytorch"
+
+            try:
+                print("[Image Predictor] Lazily loading Apurva ResNet18 PyTorch model...")
+                cls._model, cls._idx_to_class, cls._device = load_image_model()
+                cls._classes = list(CANONICAL_CNN_CLASSES)
+                print(f"[Image Predictor] Apurva ResNet18 loaded successfully on {cls._device}")
+                return "pytorch"
+            except Exception as e:
+                print(f"[Image Predictor] Error loading Apurva ResNet18 model: {e}. Fallback enabled.")
+                cls._model = None
+                return "fallback"
 
     @classmethod
     def predict(

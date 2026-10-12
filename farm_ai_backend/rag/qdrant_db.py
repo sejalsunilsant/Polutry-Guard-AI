@@ -15,14 +15,8 @@ client: QdrantClient = None
 
 if host and api_key and host != "your_qdrant_cloud_host" and api_key != "your_qdrant_api_key":
     try:
-        # Initialize client with Qdrant Cloud URL and API key
+        # Initialize client with Qdrant Cloud URL and API key (lightweight HTTP client, no redundant model loading)
         client = QdrantClient(url=host, api_key=api_key)
-        # If client supports fastembed set_model, configure it; otherwise use client directly
-        if hasattr(client, "set_model"):
-            try:
-                client.set_model("sentence-transformers/all-MiniLM-L6-v2")
-            except Exception as me:
-                print(f"[Qdrant] Note: Fastembed set_model skipped ({me})")
         print(f"[Qdrant] Initialized Qdrant Cloud client at: {host}")
     except Exception as e:
         print(f"[Qdrant] Error initializing Qdrant Cloud client: {e}")
