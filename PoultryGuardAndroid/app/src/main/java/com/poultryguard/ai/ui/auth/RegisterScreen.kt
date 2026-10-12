@@ -40,6 +40,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.res.painterResource
 import com.poultryguard.ai.R
 import com.poultryguard.ai.ui.theme.*
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import com.poultryguard.ai.data.service.LocationHelper
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,7 +54,13 @@ fun RegisterScreen(
     onNavigateToLogin: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
+
+    var isLocating by remember { mutableStateOf(false) }
+    var locationNoticeMessage by remember { mutableStateOf<String?>(null) }
+    var pendingLocationTarget by remember { mutableStateOf<String?>(null) }
 
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
@@ -96,6 +108,62 @@ fun RegisterScreen(
 
     var validationError by remember { mutableStateOf<String?>(null) }
     val scrollState = rememberScrollState()
+
+    fun triggerFetchLocation(target: String) {
+        if (!LocationHelper.isLocationServiceEnabled(context)) {
+            locationNoticeMessage = "Device GPS / Location service is turned off. Please enable location services in your device settings."
+            return
+        }
+
+        isLocating = true
+        coroutineScope.launch {
+            val result = LocationHelper.getCurrentGpsLocation(context)
+            isLocating = false
+            result.onSuccess { gps ->
+                latitude = String.format(java.util.Locale.US, "%.6f", gps.latitude)
+                longitude = String.format(java.util.Locale.US, "%.6f", gps.longitude)
+                latitudeError = null
+                longitudeError = null
+
+                if (target == "FARMER") {
+                    farmLocation = gps.address
+                    farmLocationError = null
+                } else {
+                    location = gps.address
+                    locationError = null
+                }
+            }.onFailure { err ->
+                locationNoticeMessage = err.localizedMessage ?: "Failed to acquire GPS location. Please try again or enter manually."
+            }
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            val target = pendingLocationTarget ?: if (selectedRole == UserRole.FARMER) "FARMER" else "VETERINARIAN"
+            triggerFetchLocation(target)
+        } else {
+            locationNoticeMessage = "Location permission is required to detect GPS coordinates. Please allow location access in App Settings."
+        }
+    }
+
+    fun requestGpsLocation(target: String) {
+        pendingLocationTarget = target
+        if (!LocationHelper.hasLocationPermission(context)) {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        } else {
+            triggerFetchLocation(target)
+        }
+    }
 
     fun validateInputs(): Boolean {
         var isValid = true
@@ -476,25 +544,25 @@ fun RegisterScreen(
                              }
 
                              Button(
-                                 onClick = {
-                                     val randomOffsetLat = (Math.random() - 0.5) * 0.1
-                                     val randomOffsetLng = (Math.random() - 0.5) * 0.1
-                                     val latVal = 18.5204 + randomOffsetLat
-                                     val lngVal = 73.8567 + randomOffsetLng
-                                     latitude = String.format(java.util.Locale.US, "%.6f", latVal)
-                                     longitude = String.format(java.util.Locale.US, "%.6f", lngVal)
-                                     farmLocation = "Pune Sector " + (1..10).random()
-                                     farmLocationError = null
-                                     latitudeError = null
-                                     longitudeError = null
-                                 },
+                                 onClick = { requestGpsLocation("FARMER") },
+                                 enabled = !isLocating,
                                  colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary.copy(alpha = 0.08f), contentColor = GreenPrimary),
                                  shape = RoundedCornerShape(8.dp),
                                  modifier = Modifier.fillMaxWidth()
                              ) {
-                                 Icon(Icons.Default.Place, contentDescription = "GPS", modifier = Modifier.size(16.dp))
-                                 Spacer(modifier = Modifier.width(6.dp))
-                                 Text("Get Current GPS Location", fontSize = 12.sp)
+                                 if (isLocating && pendingLocationTarget == "FARMER") {
+                                     CircularProgressIndicator(
+                                         modifier = Modifier.size(16.dp),
+                                         strokeWidth = 2.dp,
+                                         color = GreenPrimary
+                                     )
+                                     Spacer(modifier = Modifier.width(8.dp))
+                                     Text("Acquiring Real-time GPS Location...", fontSize = 12.sp)
+                                 } else {
+                                     Icon(Icons.Default.Place, contentDescription = "GPS", modifier = Modifier.size(16.dp))
+                                     Spacer(modifier = Modifier.width(6.dp))
+                                     Text("Get Current GPS Location", fontSize = 12.sp)
+                                 }
                              }
 
                             OutlinedTextField(
@@ -650,25 +718,25 @@ fun RegisterScreen(
                             }
 
                             Button(
-                                onClick = {
-                                    val randomOffsetLat = (Math.random() - 0.5) * 0.1
-                                    val randomOffsetLng = (Math.random() - 0.5) * 0.1
-                                    val latVal = 18.5204 + randomOffsetLat
-                                    val lngVal = 73.8567 + randomOffsetLng
-                                    latitude = String.format(java.util.Locale.US, "%.6f", latVal)
-                                    longitude = String.format(java.util.Locale.US, "%.6f", lngVal)
-                                    location = "Pune Sector " + (1..10).random()
-                                    locationError = null
-                                    latitudeError = null
-                                    longitudeError = null
-                                },
+                                onClick = { requestGpsLocation("VETERINARIAN") },
+                                enabled = !isLocating,
                                 colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary.copy(alpha = 0.08f), contentColor = GreenPrimary),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Icon(Icons.Default.Place, contentDescription = "GPS", modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Get Current GPS Location", fontSize = 12.sp)
+                                if (isLocating && pendingLocationTarget == "VETERINARIAN") {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = GreenPrimary
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Acquiring Real-time GPS Location...", fontSize = 12.sp)
+                                } else {
+                                    Icon(Icons.Default.Place, contentDescription = "GPS", modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Get Current GPS Location", fontSize = 12.sp)
+                                }
                             }
 
                             OutlinedTextField(
@@ -833,5 +901,19 @@ fun RegisterScreen(
                 }
             }
         }
+    }
+
+    if (locationNoticeMessage != null) {
+        AlertDialog(
+            onDismissRequest = { locationNoticeMessage = null },
+            icon = { Icon(Icons.Default.Place, contentDescription = "Location Alert", tint = GreenPrimary) },
+            title = { Text("Location Notice", fontWeight = FontWeight.Bold) },
+            text = { Text(locationNoticeMessage ?: "") },
+            confirmButton = {
+                TextButton(onClick = { locationNoticeMessage = null }) {
+                    Text("OK", color = GreenPrimary, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 }

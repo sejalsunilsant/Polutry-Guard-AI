@@ -347,6 +347,7 @@ def get_user_context(profile_id):
                         except Exception:
                             pass
                     context_data["farmName"] = farm.get("name")
+                    context_data["location"] = farm.get("location")
                     context_data["latitude"] = lat
                     context_data["longitude"] = lng
 

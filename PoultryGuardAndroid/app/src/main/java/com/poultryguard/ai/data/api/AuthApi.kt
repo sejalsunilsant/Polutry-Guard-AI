@@ -81,6 +81,7 @@ data class FarmMemberDto(
 
 data class FarmDto(
     @SerializedName("name") val name: String,
+    @SerializedName("location") val location: String? = null,
     @SerializedName("latitude") val latitude: Double? = null,
     @SerializedName("longitude") val longitude: Double? = null,
     @SerializedName("batches") val batches: List<BatchDto>? = null

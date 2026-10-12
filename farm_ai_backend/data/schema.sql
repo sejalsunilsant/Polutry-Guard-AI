@@ -5,10 +5,14 @@
 CREATE TABLE IF NOT EXISTS farms (
     id VARCHAR(50) PRIMARY KEY, -- e.g. 'farm_a'
     name VARCHAR(100) NOT NULL,
+    location VARCHAR(255),
     latitude NUMERIC(9, 6),
     longitude NUMERIC(9, 6),
     created_at TIMESTAMPTZ DEFAULT now() NOT NULL
 );
+
+-- Farms location migration
+ALTER TABLE public.farms ADD COLUMN IF NOT EXISTS location VARCHAR(255);
 
 -- 2. Devices Table (ESP32-DevKitC units)
 CREATE TABLE IF NOT EXISTS devices (

@@ -840,10 +840,27 @@ def sync_user_profile(uid, name, email, role, farm_name=None, farm_location=None
             farm_data["longitude"] = lng_val
 
             if not farm_res.data:
-                supabase.table("farms").insert(farm_data).execute()
-                print(f"[Supabase] Created farm: {farm_name} ({farm_id})")
+                try:
+                    supabase.table("farms").insert(farm_data).execute()
+                    print(f"[Supabase] Created farm: {farm_name} ({farm_id})")
+                except Exception as fe:
+                    if "location" in str(fe).lower() and "location" in farm_data:
+                        print(f"[Supabase Warning] 'location' column missing on 'farms' table (PGRST204). Retrying insert without location: {fe}")
+                        farm_data_no_loc = {k: v for k, v in farm_data.items() if k != "location"}
+                        supabase.table("farms").insert(farm_data_no_loc).execute()
+                        print(f"[Supabase] Created farm (without location): {farm_name} ({farm_id})")
+                    else:
+                        raise fe
             else:
-                supabase.table("farms").update(farm_data).eq("id", farm_id).execute()
+                try:
+                    supabase.table("farms").update(farm_data).eq("id", farm_id).execute()
+                except Exception as fe:
+                    if "location" in str(fe).lower() and "location" in farm_data:
+                        print(f"[Supabase Warning] 'location' column missing on 'farms' table (PGRST204). Retrying update without location: {fe}")
+                        farm_data_no_loc = {k: v for k, v in farm_data.items() if k != "location"}
+                        supabase.table("farms").update(farm_data_no_loc).eq("id", farm_id).execute()
+                    else:
+                        raise fe
                 
             member_res = supabase.table("farm_members")\
                 .select("id")\
@@ -1058,7 +1075,15 @@ def supabase_register_user(name, email, password, role, farm_name=None, farm_loc
             farm_data["longitude"] = lng_val
 
             # Create farm
-            supabase.table("farms").insert(farm_data).execute()
+            try:
+                supabase.table("farms").insert(farm_data).execute()
+            except Exception as fe:
+                if "location" in str(fe).lower() and "location" in farm_data:
+                    print(f"[Supabase Register Warning] 'location' column missing on 'farms' table (PGRST204). Retrying insert without location: {fe}")
+                    farm_data_no_loc = {k: v for k, v in farm_data.items() if k != "location"}
+                    supabase.table("farms").insert(farm_data_no_loc).execute()
+                else:
+                    raise fe
             
             # Create farm membership
             supabase.table("farm_members").insert({

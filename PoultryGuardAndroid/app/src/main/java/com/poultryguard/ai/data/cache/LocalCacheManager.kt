@@ -132,12 +132,8 @@ class LocalCacheManager(context: Context) {
         val savedUrl = prefs.getString("api_base_url", null)
         if (savedUrl != null) return savedUrl
 
-        // Auto-detect based on device type
-        return if (isEmulator()) {
-            "http://10.0.2.2:5000/"        // Android Emulator → host machine via virtual router
-        } else {
-            "http://10.84.52.78:5000/"     // Physical device (Wi-Fi) → host PC's current Wi-Fi IP
-        }
+        // Default to live Render backend
+        return "https://polutry-guard-ai.onrender.com/"
     }
 
     fun saveApiBaseUrl(url: String) {
