@@ -49,16 +49,18 @@ import threading
 def _initialize_async_services():
     try:
         from services.image_pipeline_service import ImagePipelineService
+        # Run background watcher as a singleton with a 15-second startup grace period
+        # so Gunicorn and Flask bind to 0.0.0.0:$PORT and pass port checks immediately
         if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
-            ImagePipelineService.start_background_watcher(interval_seconds=30)
+            interval = int(os.environ.get("IMAGE_WATCHER_INTERVAL", "60"))
+            delay = int(os.environ.get("IMAGE_WATCHER_STARTUP_DELAY", "15"))
+            ImagePipelineService.start_background_watcher(
+                interval_seconds=interval,
+                startup_delay_seconds=delay,
+                sync_on_startup=False
+            )
     except Exception as e:
-        print(f"[Async Startup] Error starting background watcher: {e}")
-
-    try:
-        from data.supabase_client import cleanup_test_data
-        cleanup_test_data()
-    except Exception as _e:
-        pass
+        print(f"[Async Startup] Note starting background watcher: {e}")
 
 _startup_thread = threading.Thread(target=_initialize_async_services, daemon=True, name="AsyncStartupThread")
 _startup_thread.start()
@@ -76,7 +78,7 @@ app.register_blueprint(admin_bp)
 def root():
     return jsonify({
         "status": "online",
-        "service": "PoultryGuard AI Backend API Done",
+        "service": "PoultryGuard AI Backend API",
         "health": "/health"
     }), 200
 
@@ -88,7 +90,9 @@ def health_check():
     }), 200
 
 if __name__ == '__main__':
-    # Retrieve port from environment or default to 5000
-    port = int(os.environ.get("PORT", 5000))
-    # Start the Flask app
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Retrieve port from Render environment ($PORT) or default to 10000 / 5000
+    default_port = 10000 if os.environ.get("RENDER") else 5000
+    port = int(os.environ.get("PORT", default_port))
+    host = os.environ.get("HOST", "0.0.0.0")
+    print(f"[Backend API] Starting Flask on {host}:{port}...")
+    app.run(host=host, port=port, debug=False)

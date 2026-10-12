@@ -39,10 +39,20 @@ def main():
 
     if result.wasSuccessful():
         print("[SUCCESS] All backend tests passed successfully!")
-        sys.exit(0)
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(0)
     else:
         print("[FAILURE] Some backend tests failed.")
-        sys.exit(1)
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        os._exit(1)
 
 if __name__ == '__main__':
     main()

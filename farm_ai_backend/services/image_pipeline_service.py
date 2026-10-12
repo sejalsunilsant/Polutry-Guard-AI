@@ -21,50 +21,143 @@ from data.supabase_client import (
     create_alert
 )
 
-BUCKET_NAME = "poultry-media"
+BUCKET_NAME = os.environ.get("SUPABASE_MEDIA_BUCKET", "poultry-media")
 
 class ImagePipelineService:
     _is_running = False
+    _watcher_started = False
     _processed_cache = set()
+    _seen_files = set()
     _lock = threading.Lock()
 
     @classmethod
-    def start_background_watcher(cls, interval_seconds=20):
+    def mark_file_handled(cls, file_path, image_url=None):
+        """Marks a file as seen and handled to prevent duplicate watcher triggers."""
+        if file_path:
+            cls._seen_files.add(file_path)
+            cls._processed_cache.add(file_path)
+        if image_url:
+            cls._processed_cache.add(image_url)
+
+    @classmethod
+    def start_background_watcher(cls, interval_seconds=60, startup_delay_seconds=15, sync_on_startup=False):
         """
-        Starts the background worker that:
-        1. Scans and processes all existing unpredicted backlog images.
-        2. Continuously watches for newly uploaded images.
+        Starts the background worker as a strict singleton:
+        1. Delays initial activity by startup_delay_seconds so Flask binds and passes Render health check promptly.
+        2. Snapshots existing storage files and completed database records into baseline without heavy inference.
+        3. Polls strictly for NEWLY uploaded images only.
         """
         with cls._lock:
-            if cls._is_running:
+            if cls._watcher_started:
                 return
-            cls._is_running = True
+            cls._watcher_started = True
 
         thread = threading.Thread(
             target=cls._run_loop,
-            args=(interval_seconds,),
+            args=(interval_seconds, startup_delay_seconds, sync_on_startup),
             daemon=True,
             name="ImageMLPipelineWatcher"
         )
         thread.start()
-        print(f"[Image Pipeline] Background watcher started (poll interval: {interval_seconds}s).")
+        print(f"[Image Pipeline] Background watcher scheduled (delay: {startup_delay_seconds}s, poll: {interval_seconds}s).")
 
     @classmethod
-    def _run_loop(cls, interval_seconds):
-        # 1. Backlog scan on startup
-        print("[Image Pipeline] Running initial backlog scan for unpredicted images...")
-        try:
-            cls.process_all_unprocessed_images()
-        except Exception as e:
-            print(f"[Image Pipeline] Error in initial backlog scan: {e}")
+    def _run_loop(cls, interval_seconds, startup_delay_seconds, sync_on_startup):
+        # 1. Grace Period: Allow Flask and Gunicorn to bind to 0.0.0.0:$PORT and pass port scan
+        if startup_delay_seconds > 0:
+            time.sleep(startup_delay_seconds)
 
-        # 2. Continuous polling loop
-        while True:
+        # 2. Baseline Storage & DB Snapshot: seed known files without downloading or predicting them
+        try:
+            from data.supabase_client import get_all_completed_image_paths
+            completed_in_db = get_all_completed_image_paths()
+            cls._seen_files.update(completed_in_db)
+            cls._processed_cache.update(completed_in_db)
+
+            existing_images = cls.list_all_storage_images()
+            cls._seen_files.update(existing_images)
+            print(f"[Image Pipeline] Initial baseline registered {len(cls._seen_files)} image(s) ({len(completed_in_db)} from DB).")
+        except Exception as e:
+            print(f"[Image Pipeline] Note during initial baseline snapshot: {e}")
+
+        # 3. Optional backlog processing (disabled by default to prevent boot OOM)
+        if sync_on_startup or os.environ.get("SYNC_BACKLOG_ON_STARTUP", "false").lower() == "true":
+            print("[Image Pipeline] Running backlog scan for unpredicted images (SYNC_BACKLOG_ON_STARTUP=true)...")
             try:
-                time.sleep(interval_seconds)
                 cls.process_all_unprocessed_images()
             except Exception as e:
+                print(f"[Image Pipeline] Error in backlog scan: {e}")
+        else:
+            print("[Image Pipeline] Watcher active: pipeline triggers ONLY when a new image is uploaded.")
+
+        cls._is_running = True
+
+        # 4. Continuous watcher: triggers ONLY when a new image file is uploaded
+        while cls._is_running:
+            try:
+                time.sleep(interval_seconds)
+                cls.check_and_process_new_images()
+            except Exception as e:
                 print(f"[Image Pipeline] Error in background watcher loop: {e}")
+
+    @classmethod
+    def check_and_process_new_images(cls):
+        """
+        Polls storage and processes ONLY newly uploaded images that were not in baseline.
+        Does not re-download or re-process existing images.
+        """
+        if not supabase:
+            return []
+
+        try:
+            current_images = cls.list_all_storage_images()
+            if not current_images:
+                return []
+
+            # Identify genuinely new files that appeared since last check
+            new_images = [img for img in current_images if img not in cls._seen_files]
+            if not new_images:
+                return []
+
+            print(f"[Image Pipeline] Detected {len(new_images)} newly uploaded image(s): {new_images}")
+            results = []
+            for img_path in new_images:
+                cls._seen_files.add(img_path)
+                try:
+                    res = cls.process_single_image(img_path)
+                    if res.get("status") == "success":
+                        results.append(res)
+                except Exception as ex:
+                    print(f"[Image Pipeline] Error processing newly uploaded image '{img_path}': {ex}")
+                finally:
+                    import gc
+                    gc.collect()
+
+            return results
+        except Exception as e:
+            print(f"[Image Pipeline] Error checking for new images: {e}")
+            return []
+
+    @classmethod
+    def trigger_single_image_async(cls, file_path):
+        """
+        Asynchronously triggers prediction pipeline for a single newly uploaded image.
+        """
+        if not file_path:
+            return
+        cls._seen_files.add(file_path)
+
+        def _worker():
+            try:
+                cls.process_single_image(file_path)
+            except Exception as e:
+                print(f"[Image Pipeline] Async trigger error for '{file_path}': {e}")
+            finally:
+                import gc
+                gc.collect()
+
+        t = threading.Thread(target=_worker, daemon=True, name=f"ImageML-{file_path[:16]}")
+        t.start()
 
     @classmethod
     def list_all_storage_images(cls, prefix=""):
@@ -104,35 +197,19 @@ class ImagePipelineService:
     def is_image_already_predicted(cls, image_url, file_path):
         """
         Checks if this image file has already been processed and saved in the DB.
+        Checks in-memory cache first, then queries Supabase database status.
         """
-        if file_path in cls._processed_cache or image_url in cls._processed_cache:
+        if file_path in cls._processed_cache or (image_url and image_url in cls._processed_cache):
             return True
 
-        if not supabase:
-            return False
-
         try:
-            # Check 1: In sensor_telemetry by image_url
-            res1 = supabase.table("sensor_telemetry")\
-                .select("id")\
-                .or_(f"image_url.eq.{image_url},image_url.ilike.%{file_path}%")\
-                .limit(1)\
-                .execute()
-            if res1.data and len(res1.data) > 0:
-                cls._processed_cache.add(file_path)
-                return True
-
-            # Check 2: In disease_events by representative_image_url
-            res2 = supabase.table("disease_events")\
-                .select("id")\
-                .or_(f"representative_image_url.eq.{image_url},representative_image_url.ilike.%{file_path}%")\
-                .limit(1)\
-                .execute()
-            if res2.data and len(res2.data) > 0:
-                cls._processed_cache.add(file_path)
+            from data.supabase_client import get_image_prediction_status
+            status_rec = get_image_prediction_status(file_path, image_url)
+            if status_rec and str(status_rec.get("status", "")).upper() == "COMPLETED":
+                cls.mark_file_handled(file_path, image_url)
                 return True
         except Exception as e:
-            print(f"[Image Pipeline] Error checking duplicate prediction for '{file_path}': {e}")
+            print(f"[Image Pipeline] Note checking prediction status: {e}")
 
         return False
 
@@ -179,17 +256,46 @@ class ImagePipelineService:
         """
         Downloads the image from Supabase Storage, runs Apurva ResNet18 and
         Decision Fusion, associates with farm/shade telemetry, and saves prediction.
+        Enforces database-level idempotency to prevent duplicate predictions across
+        restarts, worker respawns, or webhook retries.
         """
+        if not file_path:
+            return {"status": "error", "reason": "file_path_required"}
+
         image_url = cls.get_public_url(file_path)
 
-        # 1. Skip if already processed
+        # 1. Skip if already processed according to in-memory cache or DB status
         if cls.is_image_already_predicted(image_url, file_path):
-            return {"status": "skipped", "reason": "already_predicted"}
+            print(f"[Image Pipeline] Skipping '{file_path}': already predicted in database.")
+            return {"status": "skipped", "reason": "already_predicted", "file_path": file_path, "imageUrl": image_url}
 
         farm_id, device_id = cls.parse_farm_and_shade(file_path)
+
+        # 2. Database-level idempotency claim
+        from data.supabase_client import (
+            claim_image_for_processing,
+            save_image_prediction_status
+        )
+        claimed, existing_rec = claim_image_for_processing(
+            image_path=file_path,
+            image_url=image_url,
+            device_id=device_id,
+            farm_id=farm_id
+        )
+        if not claimed:
+            print(f"[Image Pipeline] Skipping '{file_path}': already claimed or completed in database.")
+            cls.mark_file_handled(file_path, image_url)
+            return {
+                "status": "skipped",
+                "reason": "already_claimed_or_completed",
+                "file_path": file_path,
+                "imageUrl": image_url,
+                "details": existing_rec
+            }
+
         print(f"[Image Pipeline] Processing image '{file_path}' for Farm: '{farm_id}', Shade/Device: '{device_id}'...")
 
-        # 2. Download image bytes
+        # 3. Download image bytes
         image_bytes = None
         if supabase:
             try:
@@ -205,14 +311,35 @@ class ImagePipelineService:
 
         if not image_bytes:
             print(f"[Image Pipeline] Failed to download image bytes for '{file_path}'. Will retry later.")
+            save_image_prediction_status(
+                image_path=file_path,
+                status="FAILED",
+                image_url=image_url,
+                device_id=device_id,
+                farm_id=farm_id,
+                error_message="download_failed"
+            )
             return {"status": "error", "reason": "download_failed"}
 
-        # 3. Run Image Model Prediction (Apurva PyTorch ResNet-18)
+        # 4. Run Image Model Prediction (Apurva PyTorch ResNet-18)
         try:
             image_pred = ImagePredictor.predict(image_bytes)
         except Exception as pred_err:
             print(f"[Image Pipeline] Image prediction error for '{file_path}': {pred_err}")
+            save_image_prediction_status(
+                image_path=file_path,
+                status="FAILED",
+                image_url=image_url,
+                device_id=device_id,
+                farm_id=farm_id,
+                error_message=str(pred_err)
+            )
             return {"status": "error", "reason": "prediction_failed"}
+        finally:
+            try:
+                del image_bytes
+            except Exception:
+                pass
 
         # 4. Fetch Corresponding Environmental Telemetry Context
         telemetry_record = get_last_telemetry(device_id)
@@ -352,9 +479,29 @@ class ImagePipelineService:
                 severity=risk_level
             )
 
-        # 10. Mark file as processed in cache
+        # 10. Persist completion status to Supabase for database-level idempotency
+        save_image_prediction_status(
+            image_path=file_path,
+            status="COMPLETED",
+            image_url=image_url,
+            disease=fused_disease,
+            confidence=float(confidence),
+            risk_level=risk_level,
+            device_id=device_id,
+            farm_id=farm_id,
+            telemetry_id=telemetry_id,
+            prediction_id=saved_pred_id,
+            event_id=event_id
+        )
+
+        # 11. Mark file as processed in cache
+        cls._seen_files.add(file_path)
         cls._processed_cache.add(file_path)
         cls._processed_cache.add(image_url)
+
+        # Force garbage collection to free intermediate tensors and image buffers immediately
+        import gc
+        gc.collect()
 
         print(f"[Image Pipeline] Successfully processed '{file_path}': Disease={fused_disease}, Risk={risk_level}, Conf={confidence:.2f}")
 
@@ -367,7 +514,9 @@ class ImagePipelineService:
             "disease": fused_disease,
             "risk_level": risk_level,
             "confidence": float(confidence),
-            "telemetry_id": telemetry_id
+            "telemetry_id": telemetry_id,
+            "prediction_id": saved_pred_id,
+            "event_id": event_id
         }
 
     @classmethod

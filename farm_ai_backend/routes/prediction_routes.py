@@ -452,6 +452,11 @@ def guardian_predict_endpoint():
             ts_str = int(time.time())
             filename = f"guardian_{device_id}_{ts_str}.jpg"
             image_url = upload_media_bytes(image_bytes, "poultry-media", "images", filename)
+            try:
+                from services.image_pipeline_service import ImagePipelineService
+                ImagePipelineService.mark_file_handled(f"images/{filename}", image_url)
+            except Exception:
+                pass
 
         # Upload and Predict Sound
         sound_url = None
@@ -665,13 +670,24 @@ def sync_unprocessed_images_endpoint():
 def process_single_storage_image_endpoint():
     """
     Webhook endpoint callable when a new file is uploaded to Supabase Storage.
-    Payload: {"name": "farm_a/shed_1_cam/image_20261002.jpg"} or {"record": {"name": "..."}}
+    Supports standard Supabase Storage webhook payloads, direct JSON, and form payloads.
     """
     try:
-        data = request.get_json() or {}
-        file_path = data.get("name") or data.get("record", {}).get("name") or data.get("filePath")
+        data = request.get_json(silent=True) or request.form.to_dict() or {}
+        record = data.get("record", {}) if isinstance(data.get("record"), dict) else {}
+        file_path = (
+            data.get("name") or 
+            data.get("filePath") or 
+            data.get("file_path") or 
+            record.get("name") or 
+            record.get("path")
+        )
+        if not file_path and (data.get("image_url") or data.get("imageUrl")):
+            from data.supabase_client import get_relative_path_from_url
+            file_path = get_relative_path_from_url(data.get("image_url") or data.get("imageUrl"))
+
         if not file_path:
-            return jsonify({"status": "error", "message": "File path 'name' is required"}), 400
+            return jsonify({"status": "error", "message": "File path 'name' or 'filePath' is required"}), 400
 
         from services.image_pipeline_service import ImagePipelineService
         res = ImagePipelineService.process_single_image(file_path)

@@ -726,5 +726,38 @@ CREATE POLICY "Secure update on veterinary_cases" ON public.veterinary_cases
     )
     WITH CHECK (true);
 
+-- 27. Image Processing Status Table for Idempotent AI Prediction Pipeline
+CREATE TABLE IF NOT EXISTS public.image_processing_status (
+    image_path VARCHAR(500) PRIMARY KEY,
+    image_url TEXT,
+    status VARCHAR(50) DEFAULT 'COMPLETED' NOT NULL, -- 'PROCESSING', 'COMPLETED', 'FAILED'
+    disease VARCHAR(100),
+    confidence NUMERIC(4, 3),
+    risk_level VARCHAR(20),
+    device_id VARCHAR(50),
+    farm_id VARCHAR(50),
+    telemetry_id BIGINT REFERENCES public.sensor_telemetry(id) ON DELETE SET NULL,
+    prediction_id BIGINT REFERENCES public.disease_predictions(id) ON DELETE SET NULL,
+    event_id BIGINT REFERENCES public.disease_events(id) ON DELETE SET NULL,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT now() NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT now() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_processing_status_url ON public.image_processing_status (image_url);
+CREATE INDEX IF NOT EXISTS idx_image_processing_status_status ON public.image_processing_status (status);
+
+GRANT ALL PRIVILEGES ON TABLE public.image_processing_status TO anon, authenticated;
+ALTER TABLE IF EXISTS public.image_processing_status ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public select on image_processing_status" ON public.image_processing_status;
+DROP POLICY IF EXISTS "Allow public insert on image_processing_status" ON public.image_processing_status;
+DROP POLICY IF EXISTS "Allow public update on image_processing_status" ON public.image_processing_status;
+
+CREATE POLICY "Allow public select on image_processing_status" ON public.image_processing_status FOR SELECT USING (true);
+CREATE POLICY "Allow public insert on image_processing_status" ON public.image_processing_status FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update on image_processing_status" ON public.image_processing_status FOR UPDATE USING (true) WITH CHECK (true);
+
+
 
 
