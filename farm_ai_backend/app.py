@@ -43,20 +43,25 @@ from ml.manager import ModelManager
 app = Flask(__name__)
 CORS(app)  # Enable CORS for local emulator API queries
 
-# Pre-load all machine learning models into memory at application startup
-ModelManager.initialize_all_models()
+# Asynchronously initialize background tasks to prevent blocking WSGI startup and health checks
+import threading
 
-# Start background watcher for automatic Supabase storage image detection & prediction
-from services.image_pipeline_service import ImagePipelineService
-if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
-    ImagePipelineService.start_background_watcher(interval_seconds=15)
+def _initialize_async_services():
+    try:
+        from services.image_pipeline_service import ImagePipelineService
+        if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+            ImagePipelineService.start_background_watcher(interval_seconds=30)
+    except Exception as e:
+        print(f"[Async Startup] Error starting background watcher: {e}")
 
-# Ensure no leftover testing data persists in database
-try:
-    from data.supabase_client import cleanup_test_data
-    cleanup_test_data()
-except Exception as _e:
-    pass
+    try:
+        from data.supabase_client import cleanup_test_data
+        cleanup_test_data()
+    except Exception as _e:
+        pass
+
+_startup_thread = threading.Thread(target=_initialize_async_services, daemon=True, name="AsyncStartupThread")
+_startup_thread.start()
 
 
 # Register Blueprints for modular routes

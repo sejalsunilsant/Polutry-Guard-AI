@@ -52,6 +52,3 @@ def load_knowledge_base():
         print(f"[RAG Vector DB] Error building TF-IDF index: {e}")
         
     return chunks, vectorizer, tfidf_matrix
-
-# Initialize on import
-load_knowledge_base()

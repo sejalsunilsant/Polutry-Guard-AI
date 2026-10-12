@@ -6,9 +6,10 @@ class ModelManager:
     @staticmethod
     def initialize_all_models():
         """
-        Load all machine learning models into memory at application start.
+        Explicitly preloads all machine learning models if pre-warming is requested.
+        Each predictor also supports thread-safe on-demand lazy initialization.
         """
-        print("[Model Manager] Initializing and preloading all models...")
+        print("[Model Manager] Explicitly preloading all models...")
         
         # Load Apurva Environmental model (XGBoost)
         SensorPredictor.load_model()
@@ -19,7 +20,7 @@ class ModelManager:
         # Load Apurva Visual model (PyTorch ResNet-18)
         ImagePredictor.load_model()
         
-        print("[Model Manager] All models preloaded in memory and ready.")
+        print("[Model Manager] All models initialized and ready in memory.")
 
     @staticmethod
     def predict_sensor(sensor_features):

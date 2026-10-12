@@ -15,7 +15,10 @@ from Apurva_Model.Environment.environmental_predictor import (
 )
 
 
+import threading
+
 class SensorPredictor:
+    _lock = threading.Lock()
     _model = None
     _preprocessor = None
     _classes = ["Healthy", "Fowlpox", "Infectious Coryza"]
@@ -23,24 +26,28 @@ class SensorPredictor:
     @classmethod
     def load_model(cls):
         """
-        Load XGBoost environmental model and preprocessor once (Singleton).
+        Load XGBoost environmental model and preprocessor lazily once (thread-safe singleton).
         """
         if cls._model is not None and cls._preprocessor is not None:
             return cls._model, cls._classes
 
-        try:
-            print("[Sensor Predictor] Loading Apurva XGBoost model and preprocessor...")
-            cls._model = load_environmental_model()
-            cls._preprocessor = load_environmental_preprocessor()
-            cls._classes = list(ENVIRONMENTAL_CLASSES)
-            print(f"[Sensor Predictor] Apurva Environmental Model loaded successfully with classes: {cls._classes}")
-        except Exception as e:
-            print(f"[Sensor Predictor] Error loading Apurva environmental model: {e}")
-            cls._model = None
-            cls._preprocessor = None
-            cls._classes = ["Healthy", "Fowlpox", "Infectious Coryza"]
+        with cls._lock:
+            if cls._model is not None and cls._preprocessor is not None:
+                return cls._model, cls._classes
 
-        return cls._model, cls._classes
+            try:
+                print("[Sensor Predictor] Lazily loading Apurva XGBoost model and preprocessor...")
+                cls._model = load_environmental_model()
+                cls._preprocessor = load_environmental_preprocessor()
+                cls._classes = list(ENVIRONMENTAL_CLASSES)
+                print(f"[Sensor Predictor] Apurva Environmental Model loaded successfully with classes: {cls._classes}")
+            except Exception as e:
+                print(f"[Sensor Predictor] Error loading Apurva environmental model: {e}")
+                cls._model = None
+                cls._preprocessor = None
+                cls._classes = ["Healthy", "Fowlpox", "Infectious Coryza"]
+
+            return cls._model, cls._classes
 
     @classmethod
     def predict(cls, sensor_features: Union[List[float], Dict[str, Any], np.ndarray]) -> Dict[str, Any]:

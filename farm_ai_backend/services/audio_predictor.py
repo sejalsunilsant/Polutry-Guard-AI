@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 import numpy as np
 import librosa
 from xgboost import XGBClassifier
@@ -17,10 +18,14 @@ class AudioPredictor:
     _labels = ["Healthy", "Sick"]
     _initialized = False
 
+    _lock = threading.Lock()
+
     @classmethod
     def get_instance(cls):
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
 
     def __init__(self):
