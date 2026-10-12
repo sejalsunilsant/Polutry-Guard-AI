@@ -10,7 +10,8 @@ data class UserProfile(
     val approvalStatus: String = "APPROVED",
     val rejectionReason: String? = null,
     val farmId: String? = null,
-    val token: String? = null
+    val token: String? = null,
+    val refreshToken: String? = null
 )
 
 enum class UserRole {

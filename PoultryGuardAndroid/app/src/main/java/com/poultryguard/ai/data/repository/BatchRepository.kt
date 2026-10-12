@@ -94,7 +94,14 @@ class BatchRepository(private val context: Context) {
     suspend fun getActiveBatch(farmId: String): Result<Batch?> = withContext(Dispatchers.IO) {
         try {
             val api = getApi() ?: throw Exception("API not initialized.")
-            val response = api.getActiveBatch(farmId)
+            val effectiveFarmId = farmId.takeIf { it.isNotBlank() } ?: run {
+                val cachedUser = cacheManager.getCachedUserProfile()
+                cachedUser?.farmId?.takeIf { it.isNotBlank() } ?: cachedUser?.uid ?: ""
+            }
+            if (effectiveFarmId.isBlank()) {
+                return@withContext Result.success(cacheManager.getCachedActiveBatch())
+            }
+            val response = api.getActiveBatch(effectiveFarmId)
             if (response.status == "success") {
                 cacheManager.cacheActiveBatch(response.data)
                 Result.success(response.data)
@@ -155,15 +162,33 @@ class BatchRepository(private val context: Context) {
     suspend fun getAllBatches(farmId: String): Result<List<Batch>> = withContext(Dispatchers.IO) {
         try {
             val api = getApi() ?: throw Exception("API not initialized.")
-            val response = api.getAllBatches(farmId)
+            val effectiveFarmId = farmId.takeIf { it.isNotBlank() } ?: run {
+                val cachedUser = cacheManager.getCachedUserProfile()
+                cachedUser?.farmId?.takeIf { it.isNotBlank() } ?: cachedUser?.uid ?: ""
+            }
+            if (effectiveFarmId.isBlank()) {
+                val cached = cacheManager.getCachedActiveBatch()
+                return@withContext Result.success(cached?.let { listOf(it) } ?: emptyList())
+            }
+            val response = api.getAllBatches(effectiveFarmId)
             if (response.status == "success" && response.data != null) {
+                val active = response.data.find { it.status == BatchStatus.ACTIVE }
+                if (active != null) {
+                    cacheManager.cacheActiveBatch(active)
+                }
                 Result.success(response.data)
             } else {
-                Result.success(emptyList())
+                val cached = cacheManager.getCachedActiveBatch()
+                Result.success(cached?.let { listOf(it) } ?: emptyList())
             }
         } catch (e: Exception) {
             Log.e("BatchRepository", "Error fetching batch history: ${e.localizedMessage}")
-            Result.failure(e)
+            val cached = cacheManager.getCachedActiveBatch()
+            if (cached != null) {
+                Result.success(listOf(cached))
+            } else {
+                Result.failure(e)
+            }
         }
     }
 

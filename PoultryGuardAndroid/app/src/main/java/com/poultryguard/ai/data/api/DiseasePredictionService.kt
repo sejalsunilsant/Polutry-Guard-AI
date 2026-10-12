@@ -54,7 +54,8 @@ data class GuardianPredictionResponse(
 enum class DiseaseRiskLevel {
     LOW,
     MEDIUM,
-    HIGH
+    HIGH,
+    CRITICAL
 }
 
 interface DiseasePredictionApi {

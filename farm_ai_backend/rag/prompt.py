@@ -9,32 +9,92 @@ def build_rag_system_prompt(farm_context, retrieved_knowledge, live_context=None
         live_context: Dict from live_context.fetch_live_batch_context() with authoritative
                       batch, mortality, disease, alert data from Supabase. Optional.
     """
-    # Extract client telemetry (used as supplementary/real-time signal)
-    temp = farm_context.get('currentTemperature', 24.0)
-    humid = farm_context.get('currentHumidity', 60.0)
-    ammonia = farm_context.get('currentAmmonia', 10.0)
-    sound = farm_context.get('currentSoundLevel', 50.0)
+    # Extract batch and flock status
     birds = farm_context.get('birdCount', 0)
     deaths = farm_context.get('loggedMortalities', 0)
-    shed = farm_context.get('activeShed', 'Unknown')
+    shed = farm_context.get('activeShed', 'Active Shed')
 
-    # --- Override with authoritative DB data if available ---
+    # Resolve live vs previous telemetry
+    is_live = False
+    temp = None
+    humid = None
+    ammonia = None
+    sound = None
+    prev_tel = None
+
     if live_context:
-        db_telemetry = live_context.get("latest_telemetry")
-        if db_telemetry:
-            temp = float(db_telemetry.get("temperature", temp))
-            humid = float(db_telemetry.get("humidity", humid))
-            ammonia = float(db_telemetry.get("ammonia", ammonia))
-            sound = float(db_telemetry.get("sound_level", sound))
-        
+        db_tel = live_context.get("latest_telemetry")
+        if db_tel and db_tel.get("temperature") is not None and float(db_tel["temperature"]) > 0:
+            temp = float(db_tel["temperature"])
+            humid = float(db_tel.get("humidity", 60.0))
+            ammonia = float(db_tel.get("ammonia", 10.0))
+            sound = float(db_tel.get("sound_level", 50.0))
+            is_live = True
+        prev_tel = live_context.get("previous_telemetry")
+
         batch = live_context.get("batch")
         if batch:
             birds = batch.get("current_count", birds)
-            shed = f"{batch.get('id', 'Unknown')} ({batch.get('breed', 'Broiler')})"
+            shed = f"{batch.get('id', 'Active Shed')} ({batch.get('breed', 'Broiler')})"
         
         mortality_summary = live_context.get("mortality_summary", {})
         if mortality_summary:
             deaths = mortality_summary.get("total_deaths", deaths)
+
+    # Check client telemetry if DB didn't provide live reading
+    if not is_live:
+        c_temp = farm_context.get('currentTemperature')
+        c_amm = farm_context.get('currentAmmonia')
+        if c_temp is not None and float(c_temp) > 0 and c_amm is not None and float(c_amm) > 0:
+            temp = float(c_temp)
+            humid = float(farm_context.get('currentHumidity', 60.0))
+            ammonia = float(c_amm)
+            sound = float(farm_context.get('currentSoundLevel', 50.0))
+            is_live = True
+
+    # Build telemetry instruction section (preventing 0.0 defaults)
+    if is_live:
+        telemetry_info = (
+            f"CURRENT LIVE FARM TELEMETRY IN {shed}:\n"
+            f"- Status: LIVE (Sensors active)\n"
+            f"- Temperature: {temp}°C (Ideal: 21-27°C)\n"
+            f"- Humidity: {humid}% (Ideal: 50-70%)\n"
+            f"- Ammonia Level: {ammonia} ppm (Safe: <20 ppm)\n"
+            f"- Acoustic Panic/Sound: {sound} dB (Safe: 40-65 dB)\n"
+            f"- Active Birds: {birds}\n"
+            f"- Total Deaths (This Batch): {deaths}\n"
+        )
+    elif prev_tel and prev_tel.get("temperature") is not None and float(prev_tel["temperature"]) > 0:
+        p_temp = float(prev_tel["temperature"])
+        p_amm = float(prev_tel.get("ammonia", 10.0))
+        p_hum = float(prev_tel.get("humidity", 60.0))
+        p_sound = float(prev_tel.get("sound_level", 50.0))
+        p_time = prev_tel.get("created_at", "earlier timestamp")
+        telemetry_info = (
+            f"FARM SENSOR TELEMETRY NOTICE IN {shed}:\n"
+            f"- Status: Live sensors currently unavailable/disconnected.\n"
+            f"- Telemetry previous (Recorded {p_time}):\n"
+            f"  * Temperature: {p_temp}°C\n"
+            f"  * Humidity: {p_hum}%\n"
+            f"  * Ammonia: {p_amm} ppm\n"
+            f"  * Sound: {p_sound} dB\n"
+            f"- Active Birds: {birds}\n"
+            f"- Total Deaths (This Batch): {deaths}\n"
+            f"IMPORTANT: Live telemetry fetching failed or sensors are disconnected. "
+            f"Do NOT display zero/default sensor readings as live data. "
+            f"Use 'Telemetry previous' when referencing sensor readings, and clearly notify the farmer that live sensors are currently offline.\n"
+        )
+    else:
+        telemetry_info = (
+            f"FARM SENSOR TELEMETRY NOTICE IN {shed}:\n"
+            f"- Status: Live sensors currently unreachable.\n"
+            f"- Telemetry previous: No historical sensor telemetry available.\n"
+            f"- Active Birds: {birds}\n"
+            f"- Total Deaths (This Batch): {deaths}\n"
+            f"IMPORTANT: Telemetry sensor readings failed to fetch. "
+            f"Do NOT display zero/default sensor readings as live data. "
+            f"State that live telemetry is unavailable and advise on standard broiler comfort targets (21–27°C, <20 ppm ammonia).\n"
+        )
 
     # --- RAG Knowledge Section ---
     knowledge_text = "\n\n".join([f"• {chunk}" for chunk in retrieved_knowledge])
@@ -44,13 +104,7 @@ def build_rag_system_prompt(farm_context, retrieved_knowledge, live_context=None
     # --- Build the system prompt ---
     system_instructions = (
         f"You are Poultry Guard AI, an expert veterinary and agricultural copilot.\n\n"
-        f"CURRENT FARM TELEMETRY IN {shed}:\n"
-        f"- Temperature: {temp}°C (Ideal: 21-27°C)\n"
-        f"- Humidity: {humid}% (Ideal: 50-70%)\n"
-        f"- Ammonia Level: {ammonia} ppm (Safe: <20 ppm)\n"
-        f"- Acoustic Panic/Sound: {sound} dB (Safe: 40-65 dB)\n"
-        f"- Active Birds: {birds}\n"
-        f"- Total Deaths (This Batch): {deaths}\n"
+        f"{telemetry_info}"
     )
 
     # --- Batch Details Section ---

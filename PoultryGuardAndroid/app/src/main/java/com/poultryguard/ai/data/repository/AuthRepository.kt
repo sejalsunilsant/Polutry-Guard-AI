@@ -47,6 +47,7 @@ interface AuthRepository {
     suspend fun fetchUserContext(profileId: String): Result<com.poultryguard.ai.data.api.UserContextDto>
     suspend fun configureWifi(deviceId: String, ssid: String, password: String): Result<Unit>
     suspend fun updateFcmToken(fcmToken: String): Result<Boolean>
+    suspend fun refreshSession(): Result<UserProfile>
 }
 
 
@@ -215,6 +216,30 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
         return cacheManager.getCachedUserProfile()
     }
 
+    override suspend fun refreshSession(): Result<UserProfile> = withContext(Dispatchers.IO) {
+        try {
+            val user = cacheManager.getCachedUserProfile()
+            val refreshToken = user?.refreshToken
+            if (refreshToken.isNullOrBlank()) {
+                return@withContext Result.failure(Exception("No refresh token available"))
+            }
+            val api = getApi()
+            val res = api.refreshSession(com.poultryguard.ai.data.api.RefreshTokenRequest(refreshToken))
+            if (res.status == "success" && res.data != null && !res.data.token.isNullOrBlank()) {
+                val updated = user.copy(
+                    token = res.data.token,
+                    refreshToken = res.data.refreshToken ?: refreshToken
+                )
+                cacheManager.cacheUserProfile(updated)
+                Result.success(updated)
+            } else {
+                Result.failure(Exception(res.message ?: "Failed to refresh session"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override fun isSimulatedMode(): Boolean {
         return false
     }
@@ -318,6 +343,11 @@ class SupabaseAuthRepository(private val context: Context) : AuthRepository {
                         isActive = !dto.farmId.isNullOrBlank(),
                         provisionedAt = dto.createdAt ?: ""
                     )
+                }.filterNot { kit ->
+                    val gid = kit.gatewayId.trim().lowercase()
+                    val kid = kit.kitId.trim().lowercase()
+                    val fname = kit.farmName.trim().lowercase()
+                    gid.contains("default") || kid.contains("default") || fname.contains("default") || gid.isEmpty()
                 }
                 cacheManager.saveHardwareKits(kits)
                 Result.success(kits)

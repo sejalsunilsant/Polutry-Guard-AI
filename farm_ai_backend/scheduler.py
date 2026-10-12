@@ -9,16 +9,27 @@ from data.supabase_client import (
     supabase, safe_cleanup_telemetry
 )
 
-# Load env variables manually from .env (just like app.py does)
+# Load env variables (supports candidate paths and container ENV)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-env_path = os.path.abspath(os.path.join(BASE_DIR, "..", ".env"))
-if os.path.exists(env_path):
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, val = line.split("=", 1)
-                os.environ[key.strip()] = val.strip()
+for env_path in [
+    os.path.abspath(os.path.join(BASE_DIR, ".env")),
+    os.path.abspath(os.path.join(BASE_DIR, "..", ".env")),
+    os.path.abspath(os.path.join(os.getcwd(), ".env")),
+]:
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        clean_k = k.strip()
+                        clean_v = v.strip().strip('"').strip("'")
+                        if clean_k not in os.environ:
+                            os.environ[clean_k] = clean_v
+            break
+        except Exception:
+            pass
 
 def clean_and_parse_ts(ts_str):
     if not ts_str:

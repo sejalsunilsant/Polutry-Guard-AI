@@ -1,48 +1,78 @@
-Polutry-Guard-AI/ML_Models/poultry_cnn_model.h5
+# =============================================================================
+# PoultryGuard AI - Git Ignore Configuration
+# =============================================================================
+
+# --- Environment Secrets & Credentials (NEVER COMMIT) ---
+.env
+.env.*
+!.env.example
+*.env
+local.properties
+**/local.properties
+*.pem
+*.key
+*serviceAccount*.json
+*service-account*.json
+*firebase-adminsdk*.json
+serviceAccountKey.json
+firebase_credentials.json
+
+# --- Python Environments & Caches ---
 .venv/
-# --- Python Environment & Caches ---
-.venv/
+venv/
+env/
+ENV/
 **/__pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
 
-# --- Environment Secrets & Configs ---
-.env
-local.properties
-
-# --- Android Build Outputs & Caching ---
+# --- Android Build Outputs & Intermediate Files ---
 **/build/
 .gradle/
 .kotlin/
 captures/
 .externalNativeBuild/
 .cxx/
+PoultryGuardAndroid/.idea_backup/
+PoultryGuardAndroid/.gradle/
+PoultryGuardAndroid/.kotlin/
+PoultryGuardAndroid/**/build/
+*.dex
+*.class
 
-# --- IDE Settings ---
+# --- IDE Settings & Editor Configs ---
 .idea/
 *.iml
 *.ipr
 *.iws
-.env
-# --- Large Datasets & Archives ---
-*.zip
-*.xlsx
-Polutry-Guard-AI/ML_Models/poultry_cnn_model.h5
+.vscode/
 
-# --- OS Specific ---
+# --- Large Datasets & Binary Training Archives ---
+*.zip
+*.tar.gz
+*.xlsx
+ML_Models/poultry_cnn_model.h5
+*.bin
+*.exe
+
+# --- OS Specific Files ---
 .DS_Store
 Thumbs.db
 desktop.ini
-D:\poltry_gard_ai_repo\.venv
-**/build/
-*.class
-*.bin
-*.exe
-*.dex
 *.json
-*.flat
-*.len
 *.pb
-farm_ai_backend/data/knowledge_base/poultry_stress_labeled_dataset.csv
+*.tflite
+*.h5
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.pkl
 .env
+.env.example

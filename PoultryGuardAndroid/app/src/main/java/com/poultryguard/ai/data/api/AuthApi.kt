@@ -34,6 +34,23 @@ data class ForgotPasswordRequest(
     @SerializedName("email") val email: String
 )
 
+data class RefreshTokenRequest(
+    @SerializedName("refresh_token") val refreshToken: String
+)
+
+data class RefreshTokenData(
+    @SerializedName("token") val token: String?,
+    @SerializedName("refreshToken") val refreshToken: String?,
+    @SerializedName("expiresIn") val expiresIn: Long?
+)
+
+data class RefreshTokenResponse(
+    @SerializedName("status") val status: String,
+    @SerializedName("message") val message: String?,
+    @SerializedName("data") val data: RefreshTokenData?,
+    @SerializedName("code") val code: String? = null
+)
+
 data class AuthApiResponse(
     @SerializedName("status") val status: String,
     @SerializedName("message") val message: String?,
@@ -216,6 +233,11 @@ interface AuthApi {
         @Body body: ForgotPasswordRequest
     ): AuthApiResponse
 
+    @POST("auth/refresh")
+    suspend fun refreshSession(
+        @Body body: RefreshTokenRequest
+    ): RefreshTokenResponse
+
     @retrofit2.http.GET("admin/pending-farmers")
     suspend fun getPendingFarmers(): PendingFarmersResponse
 
@@ -250,6 +272,12 @@ interface AuthApi {
     /** Fetch all registered device kits (excludes write API key). */
     @retrofit2.http.GET("admin/kits")
     suspend fun listKits(): KitListApiResponse
+
+    /** Delete a registered device kit from inventory. */
+    @retrofit2.http.DELETE("admin/kits/{device_id}")
+    suspend fun deleteKit(
+        @retrofit2.http.Path("device_id") deviceId: String
+    ): KitApiResponse
 
     /** Configure Wi-Fi credentials for a device kit. */
     @POST("device/configure-wifi")
@@ -376,16 +404,16 @@ data class CaseApiResponse(
 
 data class CaseDto(
     @SerializedName("id") val id: String,
-    @SerializedName("alert_id") val alertId: String?,
-    @SerializedName("batch_id") val batchId: String,
-    @SerializedName("veterinarian_id") val veterinarianId: String?,
+    @SerializedName("alert_id", alternate = ["alertId"]) val alertId: String?,
+    @SerializedName("batch_id", alternate = ["batchId"]) val batchId: String,
+    @SerializedName("veterinarian_id", alternate = ["veterinarianId"]) val veterinarianId: String?,
     @SerializedName("status") val status: String,
     @SerializedName("diagnosis") val diagnosis: String?,
     @SerializedName("recommendation") val recommendation: String?,
     @SerializedName("treatment") val treatment: String?,
-    @SerializedName("followUpInstructions") val followUpInstructions: String?,
-    @SerializedName("created_at") val createdAt: String? = null,
-    @SerializedName("updated_at") val updatedAt: String? = null
+    @SerializedName("followUpInstructions", alternate = ["follow_up_instructions"]) val followUpInstructions: String?,
+    @SerializedName("created_at", alternate = ["createdAt"]) val createdAt: String? = null,
+    @SerializedName("updated_at", alternate = ["updatedAt"]) val updatedAt: String? = null
 )
 
 data class SimpleApiResponse(

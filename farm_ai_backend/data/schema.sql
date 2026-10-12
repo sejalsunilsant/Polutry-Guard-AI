@@ -616,4 +616,111 @@ CREATE POLICY "Allow public insert on device_wifi_configs" ON public.device_wifi
 CREATE POLICY "Allow public select on device_wifi_configs" ON public.device_wifi_configs FOR SELECT USING (true);
 CREATE POLICY "Allow public update on device_wifi_configs" ON public.device_wifi_configs FOR UPDATE USING (true) WITH CHECK (true);
 
+-- 26. RLS Policies and UUID Migration for Alerts & Veterinary Consultations
+ALTER TABLE public.veterinary_cases 
+    ADD COLUMN IF NOT EXISTS treatment TEXT,
+    ADD COLUMN IF NOT EXISTS follow_up_instructions TEXT;
+
+ALTER TABLE public.veterinary_cases DROP CONSTRAINT IF EXISTS veterinary_cases_alert_id_fkey;
+
+ALTER TABLE public.alerts ALTER COLUMN id TYPE VARCHAR(100) USING id::text;
+ALTER TABLE public.alerts ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+
+ALTER TABLE public.veterinary_cases ALTER COLUMN id TYPE VARCHAR(100) USING id::text;
+ALTER TABLE public.veterinary_cases ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+ALTER TABLE public.veterinary_cases ALTER COLUMN alert_id TYPE VARCHAR(100) USING alert_id::text;
+
+ALTER TABLE public.veterinary_cases 
+    ADD CONSTRAINT veterinary_cases_alert_id_fkey 
+    FOREIGN KEY (alert_id) REFERENCES public.alerts(id) ON DELETE SET NULL;
+
+ALTER TABLE public.alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.veterinary_cases ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Secure select on alerts" ON public.alerts;
+DROP POLICY IF EXISTS "Secure insert on alerts" ON public.alerts;
+DROP POLICY IF EXISTS "Secure update on alerts" ON public.alerts;
+DROP POLICY IF EXISTS "Secure select on veterinary_cases" ON public.veterinary_cases;
+DROP POLICY IF EXISTS "Secure insert on veterinary_cases" ON public.veterinary_cases;
+DROP POLICY IF EXISTS "Secure update on veterinary_cases" ON public.veterinary_cases;
+
+CREATE POLICY "Secure select on alerts" ON public.alerts
+    FOR SELECT TO authenticated, anon
+    USING (
+        auth.uid() IS NULL
+        OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('ADMIN', 'VETERINARIAN'))
+        OR EXISTS (
+            SELECT 1 FROM public.batches b 
+            JOIN public.farm_members fm ON b.farm_id = fm.farm_id 
+            WHERE b.id = alerts.batch_id AND fm.profile_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Secure insert on alerts" ON public.alerts
+    FOR INSERT TO authenticated, anon
+    WITH CHECK (
+        auth.uid() IS NULL
+        OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('ADMIN', 'FARMER'))
+        OR EXISTS (
+            SELECT 1 FROM public.batches b 
+            JOIN public.farm_members fm ON b.farm_id = fm.farm_id 
+            WHERE b.id = alerts.batch_id AND fm.profile_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Secure update on alerts" ON public.alerts
+    FOR UPDATE TO authenticated, anon
+    USING (
+        auth.uid() IS NULL
+        OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'ADMIN')
+        OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'VETERINARIAN')
+        OR EXISTS (
+            SELECT 1 FROM public.batches b 
+            JOIN public.farm_members fm ON b.farm_id = fm.farm_id 
+            WHERE b.id = alerts.batch_id AND fm.profile_id = auth.uid()
+        )
+    )
+    WITH CHECK (true);
+
+CREATE POLICY "Secure select on veterinary_cases" ON public.veterinary_cases
+    FOR SELECT TO authenticated, anon
+    USING (
+        auth.uid() IS NULL
+        OR EXISTS (SELECT 1 FROM public.profiles WHERE id::text = auth.uid()::text AND role = 'ADMIN')
+        OR (
+            EXISTS (SELECT 1 FROM public.profiles WHERE id::text = auth.uid()::text AND role = 'VETERINARIAN')
+            AND (veterinarian_id::text = auth.uid()::text OR veterinarian_id IS NULL OR status = 'PENDING')
+        )
+        OR EXISTS (
+            SELECT 1 FROM public.batches b 
+            JOIN public.farm_members fm ON b.farm_id = fm.farm_id 
+            WHERE b.id = veterinary_cases.batch_id AND fm.profile_id::text = auth.uid()::text
+        )
+    );
+
+CREATE POLICY "Secure insert on veterinary_cases" ON public.veterinary_cases
+    FOR INSERT TO authenticated, anon
+    WITH CHECK (
+        auth.uid() IS NULL
+        OR EXISTS (SELECT 1 FROM public.profiles WHERE id::text = auth.uid()::text AND role IN ('ADMIN', 'VETERINARIAN'))
+        OR EXISTS (
+            SELECT 1 FROM public.batches b 
+            JOIN public.farm_members fm ON b.farm_id = fm.farm_id 
+            WHERE b.id = veterinary_cases.batch_id AND fm.profile_id::text = auth.uid()::text
+        )
+    );
+
+CREATE POLICY "Secure update on veterinary_cases" ON public.veterinary_cases
+    FOR UPDATE TO authenticated, anon
+    USING (
+        auth.uid() IS NULL
+        OR EXISTS (SELECT 1 FROM public.profiles WHERE id::text = auth.uid()::text AND role = 'ADMIN')
+        OR (
+            EXISTS (SELECT 1 FROM public.profiles WHERE id::text = auth.uid()::text AND role = 'VETERINARIAN')
+            AND (veterinarian_id::text = auth.uid()::text OR veterinarian_id IS NULL)
+        )
+    )
+    WITH CHECK (true);
+
+
 

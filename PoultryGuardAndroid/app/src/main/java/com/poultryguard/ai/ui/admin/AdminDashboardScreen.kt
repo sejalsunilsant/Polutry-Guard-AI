@@ -92,7 +92,13 @@ fun AdminDashboardScreen(
     val cacheManager = remember { LocalCacheManager(context) }
 
     var kitsList by remember {
-        mutableStateOf(cacheManager.getHardwareKits())
+        mutableStateOf(
+            cacheManager.getHardwareKits().filterNot { kit ->
+                val gid = kit.gatewayId.trim().lowercase()
+                val kid = kit.kitId.trim().lowercase()
+                gid.contains("default") || kid.contains("default") || gid.isEmpty()
+            }
+        )
     }
 
     LaunchedEffect(farmersListState, vetsListState, kitsList) {
@@ -827,7 +833,8 @@ fun AdminDashboardScreen(
                                                 expanded = showLocationMenu,
                                                 onDismissRequest = { showLocationMenu = false }
                                             ) {
-                                                val locs = listOf("All", "North Sector", "East Valley Barns", "South Hills", "West Plains")
+                                                val dynamicLocs = farmersListState.map { it.farmLocation.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+                                                val locs = listOf("All") + dynamicLocs
                                                 locs.forEach { loc ->
                                                     DropdownMenuItem(
                                                         text = { Text(loc) },
@@ -1142,13 +1149,17 @@ fun AdminDashboardScreen(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        // Kits list
+                        // Kits list - display ONLY kits inserted by admin (exclude default/hardcoded kits)
                         val filteredList = kitsList.filter { kit ->
+                            val isDefault = kit.gatewayId.trim().lowercase().contains("default") ||
+                                    kit.kitId.trim().lowercase().contains("default") ||
+                                    kit.farmName.trim().lowercase().contains("default") ||
+                                    kit.gatewayId.isBlank()
                             val matchesSearch = kit.kitId.contains(searchQuery, ignoreCase = true) ||
                                     kit.farmerName.contains(searchQuery, ignoreCase = true) ||
                                     kit.farmName.contains(searchQuery, ignoreCase = true)
                             val matchesStatus = statusFilter == "All" || kit.lifecycleStatus == statusFilter
-                            matchesSearch && matchesStatus
+                            !isDefault && matchesSearch && matchesStatus
                         }
 
                         if (filteredList.isEmpty()) {
@@ -1156,7 +1167,11 @@ fun AdminDashboardScreen(
                                 modifier = Modifier.fillMaxWidth().weight(1f),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("No hardware kits found in database.", color = TextMedium, textAlign = TextAlign.Center)
+                                Text(
+                                    text = if (kitsList.isEmpty()) "No hardware kits registered yet.\nClick 'Register Kit' above to insert a new kit." else "No hardware kits found in database.",
+                                    color = TextMedium,
+                                    textAlign = TextAlign.Center
+                                )
                             }
                         } else {
                             LazyColumn(
@@ -1226,7 +1241,21 @@ fun AdminDashboardScreen(
                                             Toast.makeText(context, "Kit ${kit.kitId} retired.", Toast.LENGTH_SHORT).show()
                                         },
                                         onFirmwareClick = { activeFirmwareKit = kit },
-                                        onReplaceClick = { activeReplaceKit = kit }
+                                        onReplaceClick = { activeReplaceKit = kit },
+                                        onDeleteClick = {
+                                            val updatedList = kitsList.filterNot { it.kitId == kit.kitId || it.gatewayId == kit.gatewayId }
+                                            kitsList = updatedList
+                                            cacheManager.deleteHardwareKit(kit.gatewayId)
+                                            coroutineScope.launch {
+                                                try {
+                                                    val api = authRepository.getAuthApi()
+                                                    api?.deleteKit(kit.gatewayId)
+                                                } catch (e: Exception) {
+                                                    // ignore
+                                                }
+                                            }
+                                            Toast.makeText(context, "Kit ${kit.kitId} deleted from inventory.", Toast.LENGTH_SHORT).show()
+                                        }
                                     )
                                 }
                             }
@@ -1419,7 +1448,14 @@ fun AdminDashboardScreen(
                     showAddKitDialog = false
                     Toast.makeText(context, "Successfully registered Device Kit ${newKit.kitId}!", Toast.LENGTH_SHORT).show()
                 },
-                nextSuggestedId = "PG-KIT-000${kitsList.size + 46}",
+                nextSuggestedId = remember(kitsList) {
+                    val maxExistingNum = kitsList.mapNotNull {
+                        val digits = it.kitId.filter { ch -> ch.isDigit() }
+                        digits.toIntOrNull()
+                    }.maxOrNull() ?: kitsList.size
+                    val nextNum = maxExistingNum + 1
+                    "PG-KIT-%04d".format(nextNum)
+                },
                 authRepository = authRepository,
                 coroutineScope = coroutineScope,
                 context = context
@@ -1673,7 +1709,8 @@ fun AdminHardwareKitCard(
     onMaintenanceClick: () -> Unit,
     onRetireClick: () -> Unit,
     onFirmwareClick: () -> Unit,
-    onReplaceClick: () -> Unit
+    onReplaceClick: () -> Unit,
+    onDeleteClick: (() -> Unit)? = null
 ) {
     val statusColor = getStatusColor(kit.lifecycleStatus)
 
@@ -1911,6 +1948,16 @@ fun AdminHardwareKitCard(
                                     onRetireClick()
                                 }
                             )
+                            if (onDeleteClick != null) {
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = "Delete", tint = AlertRed) },
+                                    text = { Text("Delete Kit", color = AlertRed) },
+                                    onClick = {
+                                        showActionsMenu = false
+                                        onDeleteClick()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -1949,9 +1996,12 @@ fun AddKitDialog(
     coroutineScope: CoroutineScope,
     context: android.content.Context
 ) {
+    val defaultSuffix = remember(nextSuggestedId) {
+        nextSuggestedId.filter { it.isDigit() }.ifBlank { "0001" }
+    }
     var kitId by remember { mutableStateOf(nextSuggestedId) }
-    var deviceId by remember { mutableStateOf("ESP32-00" + nextSuggestedId.takeLast(2)) }
-    var serialNumber by remember { mutableStateOf("PGESP0" + nextSuggestedId.takeLast(2)) }
+    var deviceId by remember { mutableStateOf("ESP32-$defaultSuffix") }
+    var serialNumber by remember { mutableStateOf("PGESP$defaultSuffix") }
     var firmwareVersion by remember { mutableStateOf("1.2.0") }
 
     // ThingSpeak cloud telemetry credentials
@@ -1968,11 +2018,11 @@ fun AddKitDialog(
     var cameraChecked by remember { mutableStateOf(false) }
 
     // Sensor serial numbers
-    var tempSerial by remember { mutableStateOf("TMP-" + nextSuggestedId.takeLast(2)) }
-    var humidSerial by remember { mutableStateOf("HUM-" + nextSuggestedId.takeLast(2)) }
-    var ammoniaSerial by remember { mutableStateOf("NH3-" + nextSuggestedId.takeLast(2)) }
-    var soundSerial by remember { mutableStateOf("MIC-" + nextSuggestedId.takeLast(2)) }
-    var cameraSerial by remember { mutableStateOf("CAM-" + nextSuggestedId.takeLast(2)) }
+    var tempSerial by remember { mutableStateOf("TMP-$defaultSuffix") }
+    var humidSerial by remember { mutableStateOf("HUM-$defaultSuffix") }
+    var ammoniaSerial by remember { mutableStateOf("NH3-$defaultSuffix") }
+    var soundSerial by remember { mutableStateOf("MIC-$defaultSuffix") }
+    var cameraSerial by remember { mutableStateOf("CAM-$defaultSuffix") }
 
     // API submission state
     var isSubmitting by remember { mutableStateOf(false) }
@@ -2707,10 +2757,10 @@ fun AddFarmerDialog(
                         lastActive = "Just now",
                         isOnline = false,
                         farmName = farmName,
-                        farmLocation = location.ifBlank { "Unspecified Sector" },
+                        farmLocation = location.trim(),
                         totalSheds = sheds.toIntOrNull() ?: 4,
                         floorSpaceSqFt = size.toIntOrNull() ?: 24000,
-                        deviceId = deviceId.ifBlank { "Unassigned" },
+                        deviceId = deviceId.trim(),
                         deviceSerial = "",
                         firmwareVersion = "",
                         activeBatchId = "",

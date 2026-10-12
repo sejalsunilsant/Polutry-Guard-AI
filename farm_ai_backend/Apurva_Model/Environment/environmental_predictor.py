@@ -23,7 +23,8 @@ INVERSE_CLASS_MAPPING = {0: "Fowlpox", 1: "Infectious Coryza", 2: "Healthy"}
 ENVIRONMENTAL_CLASSES = ["Fowlpox", "Infectious Coryza", "Healthy"]
 
 XGBOOST_MODEL_PATH = Path(__file__).resolve().parent / "poultry_environmental_xgboost.pkl"
-MODEL_PATH = Path(__file__).resolve().parent / "Environmental_factorModel.pkl"
+_LEGACY_MODEL_PATH = Path(__file__).resolve().parent / "Environmental_factorModel.pkl"
+MODEL_PATH = _LEGACY_MODEL_PATH if _LEGACY_MODEL_PATH.exists() else XGBOOST_MODEL_PATH
 
 
 def round_floats(obj: Any, precision: int = 6) -> Any:
@@ -45,10 +46,10 @@ def get_model_path() -> Path:
     """Return verified path to environmental XGBoost model."""
     if XGBOOST_MODEL_PATH.exists():
         return XGBOOST_MODEL_PATH
-    if MODEL_PATH.exists():
-        return MODEL_PATH
+    if _LEGACY_MODEL_PATH.exists():
+        return _LEGACY_MODEL_PATH
     raise EnvironmentalModelUnavailable(
-        f"Environmental model not found at {XGBOOST_MODEL_PATH} or {MODEL_PATH}."
+        f"Environmental model not found at {XGBOOST_MODEL_PATH}."
     )
 
 

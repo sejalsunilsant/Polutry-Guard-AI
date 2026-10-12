@@ -292,7 +292,28 @@ class FCMService:
                     ),
                 ),
             )
-            batch_response = _messaging_module.send_multicast(multicast_msg)
+            if hasattr(_messaging_module, "send_each_for_multicast"):
+                batch_response = _messaging_module.send_each_for_multicast(multicast_msg)
+            elif hasattr(_messaging_module, "send_multicast"):
+                batch_response = _messaging_module.send_multicast(multicast_msg)
+            else:
+                # Fallback to single messages
+                responses = []
+                success_count = 0
+                failure_count = 0
+                for tok in valid_tokens:
+                    try:
+                        single_msg = _messaging_module.Message(
+                            notification=_messaging_module.Notification(title=title, body=body),
+                            data=safe_data,
+                            token=tok,
+                            android=_messaging_module.AndroidConfig(priority="high")
+                        )
+                        _messaging_module.send(single_msg)
+                        success_count += 1
+                    except Exception:
+                        failure_count += 1
+                return {"success": True, "sent_count": success_count, "failure_count": failure_count, "invalid_tokens": []}
 
             invalid_tokens = []
             for idx, resp in enumerate(batch_response.responses):

@@ -99,15 +99,21 @@ def chat_assistant():
 
         # --- 1. Authenticate: Verify JWT token ---
         auth_header = request.headers.get("Authorization")
+        refresh_token = request.headers.get("X-Refresh-Token") or data.get("refreshToken")
         farmer_id = None
         farm_id = None
         batch_id = None
+        new_token = None
+        new_refresh_token = None
         
         if auth_header:
-            user_info, auth_error = verify_token_and_get_user(auth_header)
-            if auth_error:
-                print(f"[Chat Auth] JWT verification failed: {auth_error}")
-            elif user_info:
+            user_info, auth_error = verify_token_and_get_user(auth_header, refresh_token=refresh_token)
+            if user_info:
+                if "new_token" in user_info:
+                    new_token = user_info["new_token"]
+                    new_refresh_token = user_info.get("new_refresh_token")
+                    print(f"[Chat Auth] Token refreshed automatically for user {user_info['uid']}")
+
                 # --- 2. Resolve ownership chain server-side ---
                 farmer_id, farm_id, batch_id, chain_error = _resolve_ownership_chain(
                     user_info["uid"]
@@ -117,6 +123,8 @@ def chat_assistant():
                 
                 # --- 3. Validate client-sent context against verified ownership ---
                 _validate_client_context(farm_context, farm_id, batch_id)
+            elif auth_error:
+                print(f"[Chat Auth] JWT verification notice: {auth_error}")
 
         # Fallback if JWT was unauthenticated/expired but client provided farmerId/farmId in farmContext
         if not farm_id and farm_context:
@@ -138,8 +146,23 @@ def chat_assistant():
             farm_id=farm_id,
             batch_id=batch_id
         )
-        return jsonify({'reply': reply})
+        
+        res_payload = {'reply': reply, 'response': reply}
+        if new_token:
+            res_payload['newAccessToken'] = new_token
+            res_payload['newRefreshToken'] = new_refresh_token
+
+        response = jsonify(res_payload)
+        if new_token:
+            response.headers['X-New-Access-Token'] = new_token
+            if new_refresh_token:
+                response.headers['X-New-Refresh-Token'] = new_refresh_token
+        return response, 200
 
     except Exception as e:
         print(f"[Chatbot API] Error generating chat response: {e}")
-        return jsonify({'reply': f"Internal Server exception: {str(e)}"}), 500
+        return jsonify({
+            'reply': "I apologize, but I am temporarily experiencing an issue connecting to the reasoning service. Please check your network and farm sensors.",
+            'response': "I apologize, but I am temporarily experiencing an issue connecting to the reasoning service. Please check your network and farm sensors.",
+            'error': str(e)
+        }), 500

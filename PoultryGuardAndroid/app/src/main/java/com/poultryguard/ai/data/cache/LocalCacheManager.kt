@@ -136,7 +136,7 @@ class LocalCacheManager(context: Context) {
         return if (isEmulator()) {
             "http://10.0.2.2:5000/"        // Android Emulator → host machine via virtual router
         } else {
-            "http://10.38.77.78:5000/"     // Physical device (Wi-Fi) → host PC's current Wi-Fi IP
+            "http://10.84.52.78:5000/"     // Physical device (Wi-Fi) → host PC's current Wi-Fi IP
         }
     }
 
@@ -164,11 +164,36 @@ class LocalCacheManager(context: Context) {
                 || "google_sdk" == android.os.Build.PRODUCT)
     }
 
+    private fun isDefaultKit(kit: HardwareKit): Boolean {
+        val gid = kit.gatewayId.trim().lowercase()
+        val kid = kit.kitId.trim().lowercase()
+        val fname = kit.farmName.trim().lowercase()
+        return gid.contains("default") || kid.contains("default") || fname.contains("default") || gid.isEmpty()
+    }
+
+    init {
+        // Strip legacy or hardcoded default kits immediately upon cache manager creation
+        val cachedKitsJson = prefs.getString("hardware_kits", null)
+        if (cachedKitsJson != null) {
+            try {
+                val type = object : com.google.gson.reflect.TypeToken<List<HardwareKit>>() {}.type
+                val existing: List<HardwareKit> = gson.fromJson(cachedKitsJson, type) ?: emptyList()
+                val cleaned = existing.filterNot { isDefaultKit(it) }
+                if (cleaned.size != existing.size) {
+                    saveHardwareKits(cleaned)
+                }
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
     fun getHardwareKits(): List<HardwareKit> {
         val json = prefs.getString("hardware_kits", null) ?: return emptyList()
         return try {
             val type = object : com.google.gson.reflect.TypeToken<List<HardwareKit>>() {}.type
-            gson.fromJson(json, type)
+            val list: List<HardwareKit> = gson.fromJson(json, type) ?: emptyList()
+            list.filterNot { isDefaultKit(it) }
         } catch (e: Exception) {
             emptyList()
         }
@@ -176,7 +201,8 @@ class LocalCacheManager(context: Context) {
 
     fun saveHardwareKits(kits: List<HardwareKit>) {
         try {
-            val json = gson.toJson(kits)
+            val cleanList = kits.filterNot { isDefaultKit(it) }
+            val json = gson.toJson(cleanList)
             prefs.edit().putString("hardware_kits", json).apply()
         } catch (e: Exception) {
         }

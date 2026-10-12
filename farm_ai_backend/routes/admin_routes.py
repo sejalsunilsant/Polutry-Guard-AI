@@ -145,3 +145,20 @@ def list_kits():
         print("[ADMIN KIT LIST] exception: {}".format(e))
         return jsonify({"status": "error", "message": "Internal server error: {}".format(str(e))}), 500
 
+
+@admin_bp.route("/admin/kits/<path:device_id>", methods=["DELETE"])
+def delete_kit(device_id):
+    """
+    Delete a device kit from Supabase inventory.
+    """
+    try:
+        from data.supabase_client import delete_device_kit
+        result = delete_device_kit(device_id.strip())
+        if result.get("status") == "error":
+            return jsonify({"status": "error", "message": result.get("message")}), 400
+        return jsonify({"status": "success", "message": f"Kit '{device_id}' deleted successfully."}), 200
+    except Exception as e:
+        print("[ADMIN KIT DELETE] exception: {}".format(e))
+        return jsonify({"status": "error", "message": "Internal server error: {}".format(str(e))}), 500
+
+

@@ -1,8 +1,81 @@
 from flask import Blueprint, request, jsonify
-from data.supabase_client import create_batch, get_active_batch, update_batch_status, get_all_batches, record_mortality
+from data.supabase_client import (
+    create_batch,
+    get_active_batch,
+    update_batch_status,
+    get_all_batches,
+    record_mortality,
+    get_farm_id_for_user
+)
 from datetime import date
 
 batch_bp = Blueprint("batch_bp", __name__)
+
+@batch_bp.route('/farms/batches/active', methods=['GET'])
+def get_active_batch_no_farm_id():
+    """
+    Guard route: Android app may call /farms//batches/active (empty farmId) before the user
+    context is fully loaded. Supports query param: ?farm_id=... or ?user_id=...
+    """
+    farm_id = request.args.get('farm_id') or request.args.get('farmId')
+    user_id = request.args.get('user_id') or request.args.get('userId') or request.args.get('profile_id')
+    if user_id and not farm_id:
+        farm_id = get_farm_id_for_user(user_id)
+    if farm_id:
+        active_batch = get_active_batch(farm_id)
+        return jsonify({'status': 'success', 'data': active_batch}), 200
+    return jsonify({'status': 'success', 'data': None}), 200
+
+
+@batch_bp.route('/farms/batches', methods=['GET'])
+def get_all_batches_no_farm_id():
+    """
+    Guard route: Catches calls to /farms/batches when farmId segment is missing.
+    Supports query params: ?farm_id=..., ?user_id=...
+    """
+    farm_id = request.args.get('farm_id') or request.args.get('farmId')
+    user_id = request.args.get('user_id') or request.args.get('userId') or request.args.get('profile_id')
+    if user_id and not farm_id:
+        farm_id = get_farm_id_for_user(user_id)
+    if farm_id:
+        batches = get_all_batches(farm_id)
+        return jsonify({'status': 'success', 'data': batches}), 200
+    return jsonify({'status': 'success', 'data': []}), 200
+
+
+@batch_bp.route('/users/<user_id>/batches', methods=['GET'])
+def get_user_batches(user_id):
+    """
+    Relational endpoint: fetches batches for a user profile by resolving their farm membership.
+    """
+    try:
+        farm_id = get_farm_id_for_user(user_id) or user_id
+        batches = get_all_batches(farm_id)
+        return jsonify({
+            'status': 'success',
+            'data': batches
+        }), 200
+    except Exception as e:
+        print(f"[Batch API] Exception in get_user_batches: {e}")
+        return jsonify({'error': f"Internal server error: {str(e)}"}), 500
+
+
+@batch_bp.route('/users/<user_id>/batches/active', methods=['GET'])
+def get_user_active_batch(user_id):
+    """
+    Relational endpoint: fetches active batch for a user profile by resolving their farm membership.
+    """
+    try:
+        farm_id = get_farm_id_for_user(user_id) or user_id
+        active_batch = get_active_batch(farm_id)
+        return jsonify({
+            'status': 'success',
+            'data': active_batch
+        }), 200
+    except Exception as e:
+        print(f"[Batch API] Exception in get_user_active_batch: {e}")
+        return jsonify({'error': f"Internal server error: {str(e)}"}), 500
+
 
 @batch_bp.route('/farms/<farm_id>/batches', methods=['POST'])
 def start_poultry_batch(farm_id):
@@ -56,12 +129,9 @@ def start_poultry_batch(farm_id):
 def get_active_poultry_batch(farm_id):
     try:
         active_batch = get_active_batch(farm_id)
-        # Return 200 with null data when no active batch exists.
-        # 404 is semantically incorrect here — the route exists; the batch simply hasn't started yet.
-        # The Android BatchRepository handles data=null as "no active batch" gracefully.
         return jsonify({
             'status': 'success',
-            'data': active_batch  # None serialises to JSON null
+            'data': active_batch
         }), 200
 
     except Exception as e:

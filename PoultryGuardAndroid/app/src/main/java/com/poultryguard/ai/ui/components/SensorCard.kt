@@ -80,44 +80,29 @@ fun SensorCard(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = 18.dp, end = 16.dp, top = 16.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(start = 18.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Header: Icon + Name + Status Pill
+                // Header: Icon on left, Status Pill on right
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(statusBg),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(statusBg),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = reading.name,
-                                tint = statusColor,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = reading.name,
-                            style = Typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = TextDark,
-                            maxLines = 1
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = reading.name,
+                            tint = statusColor,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
-
-                    Spacer(modifier = Modifier.width(4.dp))
 
                     // Status Pill
                     Box(
@@ -137,22 +122,32 @@ fun SensorCard(
                     }
                 }
 
+                // Sensor Name (Full card width to prevent clipping "Temperature" / "Humidity")
+                Text(
+                    text = reading.name,
+                    style = Typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TextDark,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+
                 // Core Value Display
                 Row(
                     verticalAlignment = Alignment.Bottom,
-                    modifier = Modifier.padding(vertical = 4.dp)
+                    modifier = Modifier.padding(bottom = 2.dp)
                 ) {
                     Text(
                         text = if (reading.value != null) "%.1f".format(reading.value) else "--",
-                        fontSize = 32.sp,
+                        fontSize = 30.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextDark,
-                        lineHeight = 36.sp
+                        lineHeight = 34.sp
                     )
-                    Spacer(modifier = Modifier.width(2.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
                     Text(
                         text = reading.unit,
-                        fontSize = 18.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = TextMedium,
                         modifier = Modifier.padding(bottom = 3.dp)

@@ -155,6 +155,30 @@ def auth_login():
         return jsonify({'status': 'error', 'message': f"Internal server error: {str(e)}"}), 500
 
 
+@user_bp.route('/auth/refresh', methods=['POST'])
+def auth_refresh():
+    """
+    Refresh Supabase Auth session using a valid refresh token.
+    Returns refreshed access token, refresh token, and expiration seconds.
+    """
+    try:
+        data = request.get_json() or {}
+        refresh_token = data.get('refresh_token') or data.get('refreshToken')
+        
+        if not refresh_token:
+            return jsonify({'status': 'error', 'message': 'refresh_token is required'}), 400
+            
+        from data.supabase_client import supabase_refresh_session
+        res = supabase_refresh_session(refresh_token)
+        
+        status_code = 200 if res.get('status') == 'success' else 401
+        return jsonify(res), status_code
+    except Exception as e:
+        print(f"[Auth API] Exception in auth_refresh: {e}")
+        return jsonify({'status': 'error', 'message': f"Internal server error: {str(e)}"}), 500
+
+
+
 @user_bp.route('/auth/forgot-password', methods=['POST'])
 def auth_forgot_password():
     try:
@@ -243,9 +267,17 @@ def get_all_veterinarians_route():
 @user_bp.route('/users/<profile_id>/context', methods=['GET'])
 def get_user_context(profile_id):
     try:
+        import uuid
+        is_valid_uuid = False
+        try:
+            uuid.UUID(str(profile_id))
+            is_valid_uuid = True
+        except (ValueError, AttributeError, TypeError):
+            is_valid_uuid = False
+
         from data.supabase_client import supabase
         if not supabase:
-            # Fallback for offline mock testing if supabase isn't connected
+            # Offline development mode only
             from data.supabase_client import _mock_veterinarians
             if profile_id in _mock_veterinarians:
                 vet = _mock_veterinarians[profile_id]
@@ -265,28 +297,15 @@ def get_user_context(profile_id):
                         "experience": vet.get("experience")
                     }
                 }), 200
+            return jsonify({"status": "error", "message": f"Profile '{profile_id}' not found in offline mock."}), 404
 
-            return jsonify({
-                "status": "success",
-                "data": {
-                    "profileId": profile_id,
-                    "name": "Fallback User",
-                    "email": "user@example.com",
-                    "role": "FARMER",
-                    "farmId": "farm_fallback",
-                    "farmName": "Fallback Farm",
-                    "deviceId": "esp32_devkitc_fallback",
-                    "deviceName": "Fallback ESP32 Node",
-                    "thingspeakChannelId": "12345",
-                    "thingspeakReadApiKey": "KEY123",
-                    "wifiSsid": "Simulated-WiFi"
-                }
-            }), 200
-
-        # Fetch profile
+        # Fetch profile for UUID or email from Supabase
         profile_res = supabase.table("profiles").select("*").eq("id", profile_id).execute()
+        if not profile_res.data and "@" in str(profile_id):
+            profile_res = supabase.table("profiles").select("*").eq("email", profile_id).execute()
+
         if not profile_res.data:
-            return jsonify({'error': 'Profile not found'}), 404
+            return jsonify({"status": "error", "message": f"User profile '{profile_id}' not found in database."}), 404
 
         profile = profile_res.data[0]
         role = profile.get("role", "FARMER")
@@ -337,8 +356,8 @@ def get_user_context(profile_id):
                     device_id = device.get("id")
                     context_data["deviceId"] = device_id
                     context_data["deviceName"] = device.get("name")
-                    context_data["thingspeakChannelId"] = device.get("thingspeak_channel_id")
-                    context_data["thingspeakReadApiKey"] = device.get("thingspeak_read_api_key")
+                    context_data["thingspeakChannelId"] = device.get("thingspeak_channel_id").strip() if device.get("thingspeak_channel_id") else None
+                    context_data["thingspeakReadApiKey"] = device.get("thingspeak_read_api_key").strip() if device.get("thingspeak_read_api_key") else None
                     
                     context_data["wifiSsid"] = None
                     try:
@@ -419,13 +438,15 @@ def api_get_alerts():
 @user_bp.route("/alerts", methods=["POST"])
 def api_create_alert():
     try:
-        req = request.json
-        batch_id = req.get("batchId")
-        device_id = req.get("deviceId")
-        prediction_id = req.get("predictionId")
+        req = request.get_json(silent=True) or {}
+        batch_id = req.get("batchId") or req.get("batch_id")
+        device_id = req.get("deviceId") or req.get("device_id")
+        prediction_id = req.get("predictionId") or req.get("prediction_id")
         title = req.get("title")
         description = req.get("description")
-        severity = req.get("severity")
+        severity = req.get("severity") or "MEDIUM"
+        if not batch_id or not title:
+            return jsonify({"status": "error", "message": "batchId and title are required"}), 400
         from data.supabase_client import create_db_alert
         alert = create_db_alert(batch_id, device_id, prediction_id, title, description, severity)
         if alert:
@@ -438,8 +459,10 @@ def api_create_alert():
 @user_bp.route("/alerts/<alert_id>", methods=["PUT"])
 def api_update_alert_status(alert_id):
     try:
-        req = request.json
+        req = request.get_json(silent=True) or {}
         status = req.get("status")
+        if not status:
+            return jsonify({"status": "error", "message": "status is required"}), 400
         from data.supabase_client import update_alert_status
         success = update_alert_status(alert_id, status)
         if success:
@@ -461,11 +484,13 @@ def api_get_cases():
 @user_bp.route("/cases", methods=["POST"])
 def api_create_case():
     try:
-        req = request.json
-        alert_id = req.get("alertId")
-        batch_id = req.get("batchId")
-        veterinarian_id = req.get("veterinarianId")
-        status = req.get("status")
+        req = request.get_json(silent=True) or {}
+        alert_id = req.get("alertId") or req.get("alert_id")
+        batch_id = req.get("batchId") or req.get("batch_id")
+        veterinarian_id = req.get("veterinarianId") or req.get("veterinarian_id")
+        status = req.get("status") or "PENDING"
+        if not batch_id:
+            return jsonify({"status": "error", "message": "batchId is required"}), 400
         from data.supabase_client import create_case
         case = create_case(alert_id, batch_id, veterinarian_id, status)
         if case:
@@ -478,13 +503,15 @@ def api_create_case():
 @user_bp.route("/cases/<case_id>", methods=["PUT"])
 def api_update_case(case_id):
     try:
-        req = request.json
-        veterinarian_id = req.get("veterinarianId")
+        req = request.get_json(silent=True) or {}
+        veterinarian_id = req.get("veterinarianId") or req.get("veterinarian_id")
         status = req.get("status")
         diagnosis = req.get("diagnosis")
         recommendation = req.get("recommendation")
         treatment = req.get("treatment")
-        follow_up_instructions = req.get("followUpInstructions")
+        follow_up_instructions = req.get("followUpInstructions") or req.get("follow_up_instructions")
+        if not status:
+            return jsonify({"status": "error", "message": "status is required"}), 400
         from data.supabase_client import update_case
         success = update_case(
             case_id=case_id,

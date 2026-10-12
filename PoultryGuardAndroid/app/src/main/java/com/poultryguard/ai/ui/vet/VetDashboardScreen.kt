@@ -101,13 +101,14 @@ fun VetDashboardScreen(
                 Log.e("VetDashboard", "Failed to sync farmers: ${e.localizedMessage}")
             }
         }
-        coroutineScope.launch {
-            try {
-                caseRepository.syncAlerts()
-                caseRepository.syncCases(vetId = currentVet?.id)
-            } catch (e: Exception) {
-                Log.e("VetDashboard", "Failed to sync cases: ${e.localizedMessage}")
-            }
+    }
+
+    LaunchedEffect(currentVet?.id) {
+        try {
+            caseRepository.syncAlerts()
+            caseRepository.syncCases(vetId = currentVet?.id)
+        } catch (e: Exception) {
+            Log.e("VetDashboard", "Failed to sync cases: ${e.localizedMessage}")
         }
     }
 
@@ -516,6 +517,8 @@ fun CasesView(
                 items(pending) { case ->
                     val alert = allAlerts.find { it.id == case.alertId }
                     val farmer = allFarmers.find { it.activeBatchId == case.batchId }
+                        ?: allFarmers.find { it.deviceId.isNotBlank() && alert?.deviceId == it.deviceId }
+                        ?: allFarmers.firstOrNull()
                     val records = allMortality.filter { it.batchId == case.batchId }
                     val totalDeaths = records.sumOf { it.deathCount }
                     val predominantCause = if (records.isNotEmpty()) {
@@ -533,17 +536,19 @@ fun CasesView(
                         colors = CardDefaults.cardColors(containerColor = CardSurface)
                     ) {
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val alertTitle = if (case.alertId == null) "General Veterinary Consultation" else (alert?.title ?: "Unspecified Disease Alert")
+                            val alertDesc = if (case.alertId == null) "General flock health consultation requested by farmer." else (alert?.description ?: "No description provided.")
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(alert?.title ?: "Unspecified Disease Alert", style = Typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                Text(alertTitle, style = Typography.bodyLarge, fontWeight = FontWeight.Bold)
                                 Box(modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(AlertOrange.copy(alpha = 0.1f)).padding(horizontal = 8.dp, vertical = 2.dp)) {
                                     Text("Unassigned", color = AlertOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
-                            Text(text = alert?.description ?: "No description provided.", style = Typography.bodyMedium, color = TextMedium)
+                            Text(text = alertDesc, style = Typography.bodyMedium, color = TextMedium)
                             
                             Divider(color = DividerColor)
 
@@ -566,6 +571,8 @@ fun CasesView(
                                     coroutineScope.launch {
                                         currentVet?.let {
                                             caseRepository.assignVeterinarian(case.id, it.id)
+                                            caseRepository.syncCases(vetId = it.id)
+                                            caseRepository.syncAlerts()
                                             Toast.makeText(context, "Case claimed! Access granted.", Toast.LENGTH_SHORT).show()
                                         }
                                     }
@@ -589,6 +596,8 @@ fun CasesView(
                 items(assigned) { case ->
                     val alert = allAlerts.find { it.id == case.alertId }
                     val farmer = allFarmers.find { it.activeBatchId == case.batchId }
+                        ?: allFarmers.find { it.deviceId.isNotBlank() && alert?.deviceId == it.deviceId }
+                        ?: allFarmers.firstOrNull()
 
                     var diagnosisText by remember { mutableStateOf(case.diagnosis ?: "") }
                     var recText by remember { mutableStateOf(case.recommendation ?: "") }
@@ -607,7 +616,8 @@ fun CasesView(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column {
-                                    Text(alert?.title ?: "Active Case Review", style = Typography.bodyLarge, fontWeight = FontWeight.Bold)
+                                    val assignedTitle = if (case.alertId == null) "General Veterinary Consultation" else (alert?.title ?: "Active Case Review")
+                                    Text(assignedTitle, style = Typography.bodyLarge, fontWeight = FontWeight.Bold)
                                     Text("Status: ${case.status}", style = Typography.labelSmall, color = GreenPrimary, fontWeight = FontWeight.Bold)
                                 }
                                 Box(
@@ -626,9 +636,12 @@ fun CasesView(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                TelemetrySnapshotCard(modifier = Modifier.weight(1f), label = "Temp", value = "28.5°C", status = farmer?.tempSensorStatus ?: "NORMAL")
-                                TelemetrySnapshotCard(modifier = Modifier.weight(1f), label = "Humid", value = "62%", status = farmer?.humidSensorStatus ?: "NORMAL")
-                                TelemetrySnapshotCard(modifier = Modifier.weight(1f), label = "Ammonia", value = "22 ppm", status = farmer?.ammoniaSensorStatus ?: "WARNING")
+                                val tempVal = if (farmer?.tempSensorStatus.isNullOrBlank() || farmer?.tempSensorStatus == "NORMAL") "Normal" else farmer?.tempSensorStatus ?: "--"
+                                val humidVal = if (farmer?.humidSensorStatus.isNullOrBlank() || farmer?.humidSensorStatus == "NORMAL") "Normal" else farmer?.humidSensorStatus ?: "--"
+                                val ammoniaVal = if (farmer?.ammoniaSensorStatus.isNullOrBlank() || farmer?.ammoniaSensorStatus == "NORMAL") "Normal" else farmer?.ammoniaSensorStatus ?: "--"
+                                TelemetrySnapshotCard(modifier = Modifier.weight(1f), label = "Temp", value = tempVal, status = farmer?.tempSensorStatus ?: "NORMAL")
+                                TelemetrySnapshotCard(modifier = Modifier.weight(1f), label = "Humid", value = humidVal, status = farmer?.humidSensorStatus ?: "NORMAL")
+                                TelemetrySnapshotCard(modifier = Modifier.weight(1f), label = "Ammonia", value = ammoniaVal, status = farmer?.ammoniaSensorStatus ?: "WARNING")
                             }
 
                             // Farmer Info
@@ -643,9 +656,13 @@ fun CasesView(
                             val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
                             val creationTimeStr = sdf.format(date)
 
-                            Text("Farmer: ${farmer?.name ?: "Rajesh Kumar"}", style = Typography.bodyMedium, fontWeight = FontWeight.Bold)
-                            Text("Farm Name: ${farmer?.farmName ?: "Rajesh Broiler Farms"}", style = Typography.bodySmall, color = TextMedium)
-                            Text("Farm Location: ${farmer?.farmLocation ?: "Pune"}", style = Typography.bodySmall, color = TextMedium)
+                            val farmerName = farmer?.name?.takeIf { it.isNotBlank() } ?: "Registered Farmer"
+                            val farmName = farmer?.farmName?.takeIf { it.isNotBlank() } ?: "Flock Unit"
+                            val farmLocation = farmer?.farmLocation?.takeIf { it.isNotBlank() } ?: "Location Not Specified"
+
+                            Text("Farmer: $farmerName", style = Typography.bodyMedium, fontWeight = FontWeight.Bold)
+                            Text("Farm Name: $farmName", style = Typography.bodySmall, color = TextMedium)
+                            Text("Farm Location: $farmLocation", style = Typography.bodySmall, color = TextMedium)
                             Text("Batch ID: ${case.batchId}", style = Typography.bodySmall, color = TextMedium)
                             Text("Chick Age: ${farmer?.chickAgeDays ?: 0} days", style = Typography.bodySmall, color = TextMedium)
                             Text("Total Deaths: $totalDeaths birds", style = Typography.bodySmall, color = AlertRed, fontWeight = FontWeight.Bold)
@@ -655,8 +672,13 @@ fun CasesView(
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
                                     onClick = {
-                                        val intent = Intent(Intent.ACTION_DIAL).apply { data = Uri.parse("tel:${farmer?.phone ?: "+919876543210"}") }
-                                        context.startActivity(intent)
+                                        val phone = farmer?.phone?.trim()
+                                        if (!phone.isNullOrBlank()) {
+                                            val intent = Intent(Intent.ACTION_DIAL).apply { data = Uri.parse("tel:$phone") }
+                                            context.startActivity(intent)
+                                        } else {
+                                            Toast.makeText(context, "No farmer contact number registered.", Toast.LENGTH_SHORT).show()
+                                        }
                                     },
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(8.dp),
@@ -668,11 +690,16 @@ fun CasesView(
                                 }
                                 Button(
                                     onClick = {
-                                        val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                            data = Uri.parse("smsto:${farmer?.phone ?: "+919876543210"}")
-                                            putExtra("sms_body", "Hi ${farmer?.name ?: "Farmer"}, reviewing your case...")
+                                        val phone = farmer?.phone?.trim()
+                                        if (!phone.isNullOrBlank()) {
+                                            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                                data = Uri.parse("smsto:$phone")
+                                                putExtra("sms_body", "Hi $farmerName, reviewing your flock health case...")
+                                            }
+                                            context.startActivity(intent)
+                                        } else {
+                                            Toast.makeText(context, "No farmer contact number registered.", Toast.LENGTH_SHORT).show()
                                         }
-                                        context.startActivity(intent)
                                     },
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(8.dp),
@@ -763,6 +790,7 @@ fun CasesView(
                                                 treatment = treatmentText,
                                                 followUpInstructions = followUpText
                                             )
+                                            caseRepository.syncCases(vetId = currentVet?.id)
                                             Toast.makeText(context, "Diagnosis recorded successfully!", Toast.LENGTH_SHORT).show()
                                         }
                                     },
@@ -776,7 +804,18 @@ fun CasesView(
                                 Button(
                                     onClick = {
                                         coroutineScope.launch {
+                                            if (diagnosisText.isNotBlank() || treatmentText.isNotBlank()) {
+                                                caseRepository.submitDiagnosis(
+                                                    caseId = case.id,
+                                                    diagnosis = diagnosisText,
+                                                    recommendation = recText,
+                                                    treatment = treatmentText,
+                                                    followUpInstructions = followUpText
+                                                )
+                                            }
                                             caseRepository.resolveCase(case.id)
+                                            caseRepository.syncAlerts()
+                                            caseRepository.syncCases(vetId = currentVet?.id)
                                             Toast.makeText(context, "Case resolved and archived successfully!", Toast.LENGTH_SHORT).show()
                                         }
                                     },
