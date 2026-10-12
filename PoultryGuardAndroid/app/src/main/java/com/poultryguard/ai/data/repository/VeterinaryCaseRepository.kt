@@ -298,8 +298,18 @@ class VeterinaryCaseRepository(private val context: Context) {
             if (response.status == "success" && response.data != null) {
                 if (batchId != null) {
                     veterinaryCaseDao.deleteCasesForBatch(batchId)
+                } else if (vetId != null) {
+                    veterinaryCaseDao.deleteCasesForVet(vetId)
+                } else {
+                    veterinaryCaseDao.deleteAll()
                 }
-                val list = response.data.map { dto ->
+                val list = response.data
+                    .filter { dto ->
+                        val diag = dto.diagnosis ?: ""
+                        val rec = dto.recommendation ?: ""
+                        !diag.contains("E2E", ignoreCase = true) && !rec.contains("E2E", ignoreCase = true)
+                    }
+                    .map { dto ->
                     VeterinaryCase(
                         id = dto.id,
                         alertId = dto.alertId,

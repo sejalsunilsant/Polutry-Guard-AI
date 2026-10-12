@@ -44,8 +44,8 @@ def generate_chatbot_response(user_message, history, farm_context,
     groq_api_key = os.environ.get("GROQ_API_KEY")
     
     if groq_api_key and groq_api_key != "YOUR_GROQ_API_KEY_HERE" and groq_api_key.strip():
-        # List of models to try in sequence in case of model deprecation or rate limit
-        candidate_models = ["groq/compound-mini", "qwen/qwen3.6-27b", "groq/compound", "llama-3.3-70b-versatile"]
+        # List of supported Groq models verified against Groq API
+        candidate_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "allam-2-7b"]
         headers = {
             "Authorization": f"Bearer {groq_api_key.strip()}",
             "Content-Type": "application/json"
@@ -73,13 +73,18 @@ def generate_chatbot_response(user_message, history, farm_context,
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers=headers,
                     json=payload,
-                    timeout=8
+                    timeout=10
                 )
 
                 if response.status_code == 200:
                     result_json = response.json()
-                    reply = result_json['choices'][0]['message']['content']
-                    return reply
+                    choice_msg = result_json.get('choices', [{}])[0].get('message', {})
+                    reply = (choice_msg.get('content') or choice_msg.get('reasoning') or '').strip()
+                    if reply:
+                        return reply
+                    else:
+                        last_error = f"Groq model '{model}' returned empty content"
+                        print(f"[Chatbot] {last_error}")
                 else:
                     last_error = f"Groq model '{model}' HTTP {response.status_code}: {response.text[:150]}"
                     print(f"[Chatbot] Groq call failed for {model}: {last_error}")
@@ -103,27 +108,53 @@ def generate_offline_answer(user_message, retrieved_chunks, farm_context,
                              live_context=None, error_msg=None):
     """
     Format a high-quality offline response incorporating retrieved RAG information
-    and live database context.
+    and live database context. Never displays default dummy values like 0.0°C or 0.0 ppm.
     """
-    # Use authoritative DB values when available, fall back to client-sent context
-    temp = farm_context.get('currentTemperature', 24.0)
-    ammonia = farm_context.get('currentAmmonia', 10.0)
     deaths = farm_context.get('loggedMortalities', 0)
     birds = farm_context.get('birdCount', 0)
     
     if live_context:
-        db_telemetry = live_context.get("latest_telemetry")
-        if db_telemetry:
-            temp = float(db_telemetry.get("temperature", temp))
-            ammonia = float(db_telemetry.get("ammonia", ammonia))
-        
         batch = live_context.get("batch")
         if batch:
             birds = batch.get("current_count", birds)
-        
         mortality_summary = live_context.get("mortality_summary", {})
         if mortality_summary:
             deaths = mortality_summary.get("total_deaths", deaths)
+
+    # Determine whether genuine live telemetry is available
+    is_live = False
+    temp = None
+    ammonia = None
+
+    if live_context and live_context.get("latest_telemetry"):
+        db_tel = live_context["latest_telemetry"]
+        if db_tel.get("temperature") is not None and float(db_tel["temperature"]) > 0:
+            temp = float(db_tel["temperature"])
+            ammonia = float(db_tel.get("ammonia", 10.0))
+            is_live = True
+
+    if not is_live:
+        c_temp = farm_context.get('currentTemperature')
+        c_amm = farm_context.get('currentAmmonia')
+        if c_temp is not None and float(c_temp) > 0 and c_amm is not None and float(c_amm) > 0:
+            temp = float(c_temp)
+            ammonia = float(c_amm)
+            is_live = True
+
+    # Construct clean telemetry display line — preventing dummy 0.0 defaults
+    if is_live:
+        telemetry_line = f"*(Live Telemetry: Temp={temp}°C, Ammonia={ammonia} ppm, Deaths={deaths})*"
+        telemetry_status_msg = f"Live Telemetry shows: Temp={temp}°C, Ammonia={ammonia} ppm, Deaths={deaths}."
+    else:
+        prev_tel = live_context.get("previous_telemetry") if live_context else None
+        if prev_tel and prev_tel.get("temperature") is not None and float(prev_tel["temperature"]) > 0:
+            p_temp = float(prev_tel["temperature"])
+            p_amm = float(prev_tel.get("ammonia", 10.0))
+            telemetry_line = f"*(Telemetry previous: Temp={p_temp}°C, Ammonia={p_amm} ppm, Deaths={deaths} — live sensors offline)*"
+            telemetry_status_msg = f"Telemetry previous shows: Temp={p_temp}°C, Ammonia={p_amm} ppm (Live sensors offline)."
+        else:
+            telemetry_line = f"*(Telemetry previous: Unavailable / Sensor readings pending, Deaths={deaths})*"
+            telemetry_status_msg = f"Telemetry previous: Live sensor telemetry is currently offline/unavailable."
     
     msg_lower = user_message.lower()
     
@@ -134,7 +165,7 @@ def generate_offline_answer(user_message, retrieved_chunks, farm_context,
             f"🤖 **PoultryGuard AI (Offline RAG Advisor)**\n\n"
             f"Based on documents retrieved from the farm knowledge base:\n\n"
             f"{kb_summary}\n\n"
-            f"*(Live Telemetry: Temp={temp}°C, Ammonia={ammonia} ppm, Deaths={deaths})*"
+            f"{telemetry_line}"
         )
         
         # Append batch context if available
@@ -216,36 +247,62 @@ def generate_offline_answer(user_message, retrieved_chunks, farm_context,
                 f"- Status: {batch.get('status', '?')}"
             )
 
-    # Default rule-based responses
+    # Health / environmental questions
     if "risk" in msg_lower or "health" in msg_lower:
-        if ammonia > 20 or temp > 29:
-            return (
-                f"🚨 **Biosecurity Alert**: Live sensors indicate critical readings (Ammonia: {ammonia} ppm, Temp: {temp}°C). "
-                f"There is a HIGH disease risk of respiratory snick or infectious bronchitis. "
-                f"Action plan:\n1. Increase exhaust fan speed to 100% to purge ammonia.\n2. Enable cooling misters to combat thermal stress.\n3. Log symptoms for veterinarian review."
-            )
+        if is_live:
+            if ammonia > 20 or temp > 29:
+                return (
+                    f"🚨 **Biosecurity Alert**: Live sensors indicate critical readings (Ammonia: {ammonia} ppm, Temp: {temp}°C). "
+                    f"There is a HIGH disease risk of respiratory snick or infectious bronchitis. "
+                    f"Action plan:\n1. Increase exhaust fan speed to 100% to purge ammonia.\n2. Enable cooling misters to combat thermal stress.\n3. Log symptoms for veterinarian review."
+                )
+            else:
+                return (
+                    f"✅ **Flock Health Safe**: Current parameters are ideal (Ammonia: {ammonia} ppm, Temp: {temp}°C). "
+                    f"Flock mortality rate is normal. Keep cycling litter to maintain pristine conditions."
+                )
         else:
             return (
-                f"✅ **Flock Health Safe**: Current parameters are ideal (Ammonia: {ammonia} ppm, Temp: {temp}°C). "
-                f"Flock mortality rate is normal. Keep cycling litter to maintain pristine conditions."
+                f"⚠️ **Sensor Notice**: Live telemetry could not be retrieved from shed sensors.\n\n"
+                f"{telemetry_status_msg}\n\n"
+                f"Biosecurity Standards for Flock Health:\n"
+                f"- Safe Ammonia Limit: Below 20 ppm\n"
+                f"- Comfort Temperature: 21°C – 27°C\n"
+                f"- Please check sensor power and gateway connectivity to resume real-time monitoring."
             )
     elif "ammonia" in msg_lower or "air" in msg_lower or "gas" in msg_lower:
-        if ammonia > 18:
-            return (
-                f"💨 **Ammonia Level Warning ({ammonia} ppm)**: Ammonia levels are elevated. "
-                f"Prolonged exposure above 20 ppm causes respiratory damage in broilers and blindness. "
-                f"Please treat damp litter immediately and maximize ventilation rates."
-            )
+        if is_live:
+            if ammonia > 18:
+                return (
+                    f"💨 **Ammonia Level Warning ({ammonia} ppm)**: Ammonia levels are elevated. "
+                    f"Prolonged exposure above 20 ppm causes respiratory damage in broilers and blindness. "
+                    f"Please treat damp litter immediately and maximize ventilation rates."
+                )
+            else:
+                return f"🍃 **Air Quality OK**: Ammonia is safe at {ammonia} ppm. Keep litter dry to prevent gas release."
         else:
-            return f"🍃 **Air Quality OK**: Ammonia is safe at {ammonia} ppm. Keep litter dry to prevent gas release."
+            return (
+                f"💨 **Ammonia Safety Standards**:\n\n"
+                f"{telemetry_status_msg}\n\n"
+                f"- Critical Threshold: Ammonia must remain below 20 ppm.\n"
+                f"- Keep litter dry and aerated under nipple drinkers to prevent toxic gas spikes."
+            )
     elif "temp" in msg_lower or "heat" in msg_lower or "hot" in msg_lower:
-        if temp > 28:
-            return (
-                f"🔥 **Thermal Stress Warning ({temp}°C)**: Broilers do not have sweat glands and rely on panting. "
-                f"Current temperature is too high. Ensure misting pumps are active and water supply is chilled to promote cooling."
-            )
+        if is_live:
+            if temp > 28:
+                return (
+                    f"🔥 **Thermal Stress Warning ({temp}°C)**: Broilers do not have sweat glands and rely on panting. "
+                    f"Current temperature is too high. Ensure misting pumps are active and water supply is chilled to promote cooling."
+                )
+            else:
+                return f"🌡️ **Thermal Comfort OK**: Shed temperature is cozy at {temp}°C, ideal for broilers at this age stage."
         else:
-            return f"🌡️ **Thermal Comfort OK**: Shed temperature is cozy at {temp}°C, ideal for broilers at this age stage."
+            return (
+                f"🌡️ **Temperature Safety Standards**:\n\n"
+                f"{telemetry_status_msg}\n\n"
+                f"- Optimal Broiler Range: 21°C to 27°C depending on flock age.\n"
+                f"- Maintain negative-pressure ventilation to prevent heat pockets."
+            )
     else:
         batch_info = ""
         if live_context and live_context.get("batch"):
@@ -259,7 +316,7 @@ def generate_offline_answer(user_message, retrieved_chunks, farm_context,
             )
         return (
             f"Hello Farmer! I am your AI Assistant. "
-            f"Telemetry shows: Temp={temp}°C, Ammonia={ammonia} ppm, Deaths={deaths}. "
+            f"{telemetry_status_msg} "
             f"Ask me about biosecurity, air quality, temperature, disease symptoms, "
             f"mortality rate, batch status, or active alerts."
             f"{batch_info}"

@@ -26,6 +26,8 @@ import com.poultryguard.ai.data.model.ageDays
 import com.poultryguard.ai.data.repository.BatchRepository
 import com.poultryguard.ai.data.cache.LocalCacheManager
 import com.poultryguard.ai.data.cache.AppDatabase
+import com.poultryguard.ai.data.model.UserProfile
+import com.poultryguard.ai.data.repository.SupabaseAuthRepository
 import com.poultryguard.ai.ui.theme.*
 import com.poultryguard.ai.ui.localization.*
 
@@ -37,20 +39,81 @@ fun BatchHistoryScreen(
 ) {
     val context = LocalContext.current
     val cacheManager = remember { LocalCacheManager(context.applicationContext) }
-    val db = remember { AppDatabase.getDatabase(context.applicationContext) }
     val batchRepository = remember { BatchRepository(context) }
     var historyList by remember { mutableStateOf(emptyList<Batch>()) }
     var isLoading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
-        val user = cacheManager.getCachedUserProfile()
-        val farmerProfile = user?.email?.let { db.farmerProfileDao().getFarmerByEmail(it) }
-        val farmerId = farmerProfile?.id ?: user?.uid ?: ""
-        
-        val result = batchRepository.getAllBatches(farmerId)
-        result.onSuccess { list ->
-            historyList = list
+        isLoading = true
+        var user = cacheManager.getCachedUserProfile()
+        val authRepo = SupabaseAuthRepository(context.applicationContext)
+        val db = AppDatabase.getDatabase(context.applicationContext)
+
+        // 1. Identify best user/profile ID candidates
+        val candidateUid = user?.uid?.takeIf { it.isNotBlank() }
+            ?: user?.email?.takeIf { it.isNotBlank() }?.let { db.farmerProfileDao().getFarmerByEmail(it)?.id }
+            ?: ""
+
+        // 2. Fetch authoritative context from backend if farmId is not yet cached or candidateUid is available
+        if (candidateUid.isNotBlank() && (user?.farmId.isNullOrBlank())) {
+            try {
+                val contextResult = authRepo.fetchUserContext(candidateUid)
+                contextResult.onSuccess { dto ->
+                    if (!dto.farmId.isNullOrBlank()) {
+                        user = (user ?: UserProfile(uid = candidateUid, name = dto.name, email = dto.email)).copy(
+                            farmId = dto.farmId,
+                            farmName = dto.farmName ?: user?.farmName ?: ""
+                        )
+                        cacheManager.cacheUserProfile(user!!)
+                    }
+                }
+            } catch (e: Exception) {
+                // Offline fallback - proceed
+            }
         }
+
+        // 3. Resolve preferred farm ID: priority to canonical farmId, fallback to user.uid or local DB
+        val effectiveFarmId = user?.farmId?.takeIf { it.isNotBlank() }
+            ?: candidateUid
+            ?: ""
+
+        if (effectiveFarmId.isNotBlank()) {
+            val result = batchRepository.getAllBatches(effectiveFarmId)
+            result.fold(
+                onSuccess = { list ->
+                    if (list.isNotEmpty()) {
+                        historyList = list
+                    } else if (candidateUid.isNotBlank() && candidateUid != effectiveFarmId) {
+                        // Secondary attempt using candidateUid
+                        val fallbackResult = batchRepository.getAllBatches(candidateUid)
+                        fallbackResult.onSuccess { fbList ->
+                            if (fbList.isNotEmpty()) {
+                                historyList = fbList
+                            }
+                        }
+                    }
+                },
+                onFailure = {
+                    if (candidateUid.isNotBlank() && candidateUid != effectiveFarmId) {
+                        val fallbackResult = batchRepository.getAllBatches(candidateUid)
+                        fallbackResult.onSuccess { fbList ->
+                            if (fbList.isNotEmpty()) {
+                                historyList = fbList
+                            }
+                        }
+                    }
+                }
+            )
+        }
+
+        // 4. If list is still empty, fallback to locally cached active batch so user isn't stuck with empty screen
+        if (historyList.isEmpty()) {
+            val cachedActive = cacheManager.getCachedActiveBatch()
+            if (cachedActive != null) {
+                historyList = listOf(cachedActive)
+            }
+        }
+
         isLoading = false
     }
 

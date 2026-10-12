@@ -31,6 +31,9 @@ interface VeterinaryCaseDao {
     @Query("DELETE FROM veterinary_cases WHERE batchId = :batchId")
     suspend fun deleteCasesForBatch(batchId: String)
 
+    @Query("DELETE FROM veterinary_cases WHERE veterinarianId = :vetId")
+    suspend fun deleteCasesForVet(vetId: String)
+
     @Query("DELETE FROM veterinary_cases")
     suspend fun deleteAll()
 }

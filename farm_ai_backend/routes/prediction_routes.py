@@ -13,6 +13,16 @@ from ml.preprocessing import (
 
 prediction_bp = Blueprint("prediction_bp", __name__)
 
+def normalize_risk_level_for_client(risk_val):
+    if not risk_val:
+        return 'LOW'
+    val = str(risk_val).strip().upper()
+    if val in ['CRITICAL', 'SEVERE', 'HIGH']:
+        return 'HIGH'
+    elif val in ['MEDIUM', 'MODERATE', 'WARNING']:
+        return 'MEDIUM'
+    return 'LOW'
+
 @prediction_bp.route('/predictions/latest', methods=['GET'])
 def get_latest_prediction_endpoint():
     try:
@@ -27,13 +37,16 @@ def get_latest_prediction_endpoint():
         pred = get_last_prediction(device_id)
         
         if not pred:
+            # Return a default healthy response instead of 404 so Android app doesn't break on startup
             return jsonify({
-                'status': 'error',
-                'message': f"No predictions found for device '{device_id}'"
-            }), 404
+                'riskLevel': 'LOW',
+                'confidence': 0.0,
+                'recommendation': 'No predictions yet. Environment is being monitored.',
+                'status': 'no_data'
+            }), 200
             
         return jsonify({
-            'riskLevel': pred.get('risk_level', 'LOW'),
+            'riskLevel': normalize_risk_level_for_client(pred.get('risk_level', 'LOW')),
             'confidence': float(pred.get('confidence', 0.0)),
             'recommendation': pred.get('recommendation', '')
         }), 200
@@ -134,7 +147,7 @@ def predict_disease_endpoint():
                     pred = existing_pred.data[0]
                     print(f"[Prediction API] Returning cached prediction for telemetry_id '{telemetry_id}'")
                     return jsonify({
-                        'riskLevel': pred.get('risk_level', 'LOW'),
+                        'riskLevel': normalize_risk_level_for_client(pred.get('risk_level', 'LOW')),
                         'confidence': float(pred.get('confidence', 0.0)),
                         'recommendation': pred.get('recommendation', '')
                     }), 200
@@ -316,7 +329,7 @@ def predict_disease_endpoint():
             )
 
         return jsonify({
-            'riskLevel': risk_level,
+            'riskLevel': normalize_risk_level_for_client(risk_level),
             'confidence': confidence,
             'recommendation': recommendation
         })
@@ -618,7 +631,7 @@ def guardian_predict_endpoint():
         return jsonify({
             "status": "success",
             "condition": fused_disease,
-            "riskLevel": risk_level,
+            "riskLevel": normalize_risk_level_for_client(risk_level),
             "confidence": float(confidence),
             "recommendation": recommendation,
             "imageUrl": image_url,

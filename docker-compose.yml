@@ -1,0 +1,46 @@
+# =============================================================================
+# PoultryGuard AI - Docker Compose Configuration
+# =============================================================================
+version: '3.8'
+
+services:
+  backend-api:
+    build:
+      context: ./farm_ai_backend
+      dockerfile: Dockerfile
+    container_name: poultryguard_backend_api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      - PORT=5000
+      - HOST=0.0.0.0
+      - FLASK_ENV=production
+      - TF_ENABLE_ONEDNN_OPTS=0
+    volumes:
+      # Optional volume mount for live credentials file if not baked in
+      - ./farm_ai_backend/serviceAccountKey.json:/app/serviceAccountKey.json:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  telemetry-scheduler:
+    build:
+      context: ./farm_ai_backend
+      dockerfile: Dockerfile
+    container_name: poultryguard_telemetry_scheduler
+    restart: unless-stopped
+    command: ["python", "scheduler.py"]
+    env_file:
+      - .env
+    environment:
+      - FLASK_ENV=production
+      - TF_ENABLE_ONEDNN_OPTS=0
+    depends_on:
+      backend-api:
+        condition: service_healthy

@@ -31,7 +31,9 @@ def fetch_live_batch_context(farm_id, batch_id=None):
         "mortality_summary": {},
         "disease_events": [],
         "alerts": [],
-        "latest_telemetry": None
+        "latest_telemetry": None,
+        "previous_telemetry": None,
+        "telemetry_status": "UNAVAILABLE"
     }
     
     if not farm_id:
@@ -54,8 +56,11 @@ def fetch_live_batch_context(farm_id, batch_id=None):
             # 4. Fetch unresolved alerts for this batch
             context["alerts"] = _fetch_alerts(resolved_batch_id)
         
-        # 5. Fetch latest telemetry (device-level, linked via farm)
-        context["latest_telemetry"] = _fetch_latest_telemetry(farm_id)
+        # 5. Fetch telemetry with clear LIVE vs PREVIOUS distinction
+        latest, previous, status = _fetch_telemetry_status(farm_id)
+        context["latest_telemetry"] = latest
+        context["previous_telemetry"] = previous
+        context["telemetry_status"] = status
         
     except Exception as e:
         print(f"[Live Context] Error fetching live context for farm={farm_id}, batch={batch_id}: {e}")
@@ -167,36 +172,98 @@ def _fetch_alerts(batch_id, limit=10):
         return []
 
 
-def _fetch_latest_telemetry(farm_id):
-    """Fetch the latest telemetry reading for the farm's device."""
+def _fetch_telemetry_status(farm_id):
+    """
+    Fetch telemetry for farm devices, classifying as LIVE vs PREVIOUS.
+    Does NOT present failed API calls or stale records as successful live data.
+    
+    Returns:
+        tuple: (latest_telemetry, previous_telemetry, status)
+        where status is "LIVE", "PREVIOUS", or "UNAVAILABLE".
+    """
     from data.supabase_client import supabase
+    from datetime import datetime, timezone
     
     if not supabase or not farm_id:
-        return None
+        return None, None, "UNAVAILABLE"
+    
     try:
-        # Resolve device_id from farm
+        # Resolve all devices registered for this farm
         device_res = supabase.table("devices") \
             .select("id") \
             .eq("farm_id", farm_id) \
-            .limit(1) \
             .execute()
         
-        if not device_res.data:
-            return None
-        
-        device_id = device_res.data[0].get("id")
-        
-        # Fetch latest telemetry
+        device_ids = []
+        if device_res.data:
+            device_ids = [d.get("id") for d in device_res.data if d.get("id")]
+            
+        if not device_ids:
+            return None, None, "UNAVAILABLE"
+            
+        # Fetch the most recent telemetry record across the farm's devices
         telemetry_res = supabase.table("sensor_telemetry") \
             .select("*") \
-            .eq("device_id", device_id) \
+            .in_("device_id", device_ids) \
             .order("created_at", desc=True) \
             .limit(1) \
             .execute()
-        
+            
+        record = None
         if telemetry_res.data and len(telemetry_res.data) > 0:
-            return telemetry_res.data[0]
-        return None
+            record = telemetry_res.data[0]
+            
+        if not record:
+            # Check daily_telemetry as fallback for previous telemetry
+            daily_res = supabase.table("daily_telemetry") \
+                .select("*") \
+                .in_("device_id", device_ids) \
+                .order("date", desc=True) \
+                .limit(1) \
+                .execute()
+            if daily_res.data and len(daily_res.data) > 0:
+                d = daily_res.data[0]
+                prev = {
+                    "temperature": d.get("avg_temperature"),
+                    "humidity": d.get("avg_humidity"),
+                    "ammonia": d.get("avg_ammonia"),
+                    "sound_level": 50.0,
+                    "created_at": d.get("date")
+                }
+                return None, prev, "PREVIOUS"
+            return None, None, "UNAVAILABLE"
+            
+        # Validate that sensor readings are not dummy / zero defaults
+        temp = record.get("temperature")
+        if temp is None or float(temp) <= 0:
+            print(f"[Live Context] Telemetry record contains invalid temperature ({temp}). Marking as PREVIOUS.")
+            return None, record, "PREVIOUS"
+            
+        # Check recency: reading within the last 2 hours is considered LIVE
+        created_at_str = record.get("created_at")
+        is_live = False
+        if created_at_str:
+            try:
+                clean_ts = created_at_str.replace("Z", "+00:00")
+                ts = datetime.fromisoformat(clean_ts)
+                now = datetime.now(timezone.utc)
+                age_seconds = (now - ts).total_seconds()
+                if 0 <= age_seconds < 7200: # 2 hours
+                    is_live = True
+            except Exception as pe:
+                print(f"[Live Context] Could not parse telemetry timestamp '{created_at_str}': {pe}")
+                
+        if is_live:
+            return record, record, "LIVE"
+        else:
+            return None, record, "PREVIOUS"
+            
     except Exception as e:
-        print(f"[Live Context] Error fetching telemetry for farm {farm_id}: {e}")
-        return None
+        print(f"[Live Context] Error resolving telemetry status for farm {farm_id}: {e}")
+        return None, None, "UNAVAILABLE"
+
+
+def _fetch_latest_telemetry(farm_id):
+    """Fetch the latest telemetry reading for backward compatibility."""
+    latest, prev, status = _fetch_telemetry_status(farm_id)
+    return latest or prev

@@ -27,7 +27,7 @@ data class GroqChatMessage(
 )
 
 data class GroqRequest(
-    val model: String = "llama-3.1-8b-instant",
+    val model: String = "qwen/qwen3.8-27b",
     val messages: List<GroqChatMessage>
 )
 
@@ -47,12 +47,12 @@ data class ChatMessage(
 )
 
 data class FarmContext(
-    val currentTemperature: Float,
-    val currentHumidity: Float,
-    val currentAmmonia: Float,
-    val currentSoundLevel: Float,
-    val birdCount: Int,
-    val loggedMortalities: Int,
+    val currentTemperature: Float? = null,
+    val currentHumidity: Float? = null,
+    val currentAmmonia: Float? = null,
+    val currentSoundLevel: Float? = null,
+    val birdCount: Int = 0,
+    val loggedMortalities: Int = 0,
     val activeShed: String = "Shed #4",
     val farmerId: String? = null,
     val farmId: String? = null,
@@ -66,7 +66,9 @@ data class ChatRequest(
 )
 
 data class ChatResponse(
-    val reply: String
+    val reply: String,
+    val newAccessToken: String? = null,
+    val newRefreshToken: String? = null
 )
 
 
@@ -74,6 +76,7 @@ interface FlaskChatApi {
     @POST("chat")
     suspend fun getChatCompletion(
         @Header("Authorization") authHeader: String?,
+        @Header("X-Refresh-Token") refreshToken: String?,
         @Body request: ChatRequest
     ): ChatResponse
 }
@@ -86,7 +89,7 @@ class ChatService(private val apiKey: String) {
             || android.os.Build.DEVICE.startsWith("generic")) {
             "http://10.0.2.2:5000/"        // Emulator
         } else {
-            "http://10.193.0.78:5000/"     // Physical device
+            "http://10.84.52.78:5000/"     // Physical device
         }
         Retrofit.Builder()
             .baseUrl(baseUrl)
@@ -141,13 +144,23 @@ class ChatRepository(private val context: Context) {
             val userProfile = cacheManager.getCachedUserProfile()
             val authHeader = userProfile?.token?.let { "Bearer $it" }
                 ?: userProfile?.uid?.let { "Bearer mock_token_for_$it" }
+            val refreshToken = userProfile?.refreshToken
             
             val request = ChatRequest(
                 message = message,
                 history = history,
                 farmContext = context
             )
-            val response = api.getChatCompletion(authHeader, request)
+            val response = api.getChatCompletion(authHeader, refreshToken, request)
+
+            // Cache automatically refreshed credentials if returned by backend
+            if (!response.newAccessToken.isNullOrBlank() && userProfile != null) {
+                cacheManager.cacheUserProfile(userProfile.copy(
+                    token = response.newAccessToken,
+                    refreshToken = response.newRefreshToken ?: userProfile.refreshToken
+                ))
+            }
+
             response.reply
         } catch (e: Exception) {
             Log.e("PoultryGuardChat", "Error contacting LLM API: ${e.localizedMessage}", e)
@@ -229,31 +242,53 @@ class ChatRepository(private val context: Context) {
 
     private fun generateLocalResponse(message: String, context: FarmContext): String {
         val msg = message.lowercase()
+        val temp = context.currentTemperature
+        val amm = context.currentAmmonia
+        val hasLiveTelemetry = temp != null && temp > 0f && amm != null && amm > 0f
+
+        val telemetryDisplay = if (hasLiveTelemetry) {
+            "Live Telemetry: Temp=${temp}°C, Ammonia=${amm} ppm"
+        } else {
+            "Telemetry previous: Live sensor telemetry unavailable"
+        }
+
         return when {
             "risk" in msg || "disease" in msg || "health" in msg -> {
-                if (context.currentAmmonia > 20f || context.currentTemperature > 29f) {
-                    "🐔 **Local AI Warning**: Ammonia level is elevated (${context.currentAmmonia} ppm). High risk of respiratory Snick infection. Make sure exhaust fans are at full capacity to ventilate."
+                if (hasLiveTelemetry) {
+                    if ((amm ?: 0f) > 20f || (temp ?: 0f) > 29f) {
+                        "🐔 **Local AI Warning**: Ammonia level is elevated (${amm} ppm). High risk of respiratory Snick infection. Make sure exhaust fans are at full capacity to ventilate."
+                    } else {
+                        "🐔 **Local AI Audit**: Barn environment is safe. Telemetry shows standard comfort indicators."
+                    }
                 } else {
-                    "🐔 **Local AI Audit**: Barn environment is safe. Telemetry shows standard comfort indicators."
+                    "🐔 **Local AI Audit**: Note: $telemetryDisplay. Standard target comfort range is 21–27°C and ammonia must remain under 20 ppm."
                 }
             }
             "ammonia" in msg || "gas" in msg -> {
-                "💨 **Local Expert Tip**: Ammonia gas should be kept below 20 ppm. Dry the broiler litter to keep levels within safe parameters."
+                if (hasLiveTelemetry) {
+                    "💨 **Local Expert Tip**: Ammonia gas is at ${amm} ppm. Safe threshold is below 20 ppm. Dry the broiler litter to keep levels low."
+                } else {
+                    "💨 **Local Expert Tip**: $telemetryDisplay. Ammonia gas must strictly remain below 20 ppm to prevent respiratory damage."
+                }
             }
             "temp" in msg || "heat" in msg -> {
-                "🌡️ **Local Expert Tip**: Ambient temperature is ${context.currentTemperature}°C. Keep it stable between 21-27°C."
+                if (hasLiveTelemetry) {
+                    "🌡️ **Local Expert Tip**: Ambient temperature is ${temp}°C. Keep it stable between 21-27°C."
+                } else {
+                    "🌡️ **Local Expert Tip**: $telemetryDisplay. Maintain optimal ambient temperature between 21–27°C."
+                }
             }
             "death" in msg || "mortality" in msg -> {
                 val totalFlock = context.birdCount + context.loggedMortalities
                 if (totalFlock > 0) {
                     val rate = (context.loggedMortalities.toFloat() / totalFlock) * 100
-                    "📊 **Local Expert Tip**: Mortality rate is at %.2f%%. Stable, healthy limits.".format(rate)
+                    "📊 **Local Expert Tip**: Mortality rate is at %.2f%%. Total deaths: ${context.loggedMortalities}.".format(rate)
                 } else {
-                    "📊 **Local Expert Tip**: No birds or mortality recorded yet. Total flock count is zero."
+                    "📊 **Local Expert Tip**: Total flock count is zero. No mortalities recorded."
                 }
             }
             else -> {
-                "Hii ! I am ChickBot."
+                "Hello Farmer! I am ChickBot. $telemetryDisplay. Ask me any biosecurity, batch, or flock safety questions!"
             }
         }
     }

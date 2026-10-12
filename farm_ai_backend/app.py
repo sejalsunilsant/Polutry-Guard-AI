@@ -1,21 +1,34 @@
 import os
 import sys
 
-# Load env variables from .env file manually before importing components
+# Load environment variables (supports container ENV, local .env in backend, or project root .env)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-env_path = os.path.abspath(os.path.join(BASE_DIR, "..", ".env"))
-print(f"[Backend Env] Checking for .env at: {env_path}")
-if os.path.exists(env_path):
-    print(f"[Backend Env] .env found, parsing...")
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, val = line.split("=", 1)
-                os.environ[key.strip()] = val.strip()
-                print(f"[Backend Env] Loaded: {key.strip()}")
-else:
-    print(f"[Backend Env] WARNING: .env not found at {env_path}!")
+candidate_env_paths = [
+    os.path.abspath(os.path.join(BASE_DIR, ".env")),
+    os.path.abspath(os.path.join(BASE_DIR, "..", ".env")),
+    os.path.abspath(os.path.join(os.getcwd(), ".env")),
+]
+env_found = False
+for env_path in candidate_env_paths:
+    if os.path.exists(env_path):
+        print(f"[Backend Env] Loading environment from: {env_path}")
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, val = line.split("=", 1)
+                        clean_key = key.strip()
+                        clean_val = val.strip().strip('"').strip("'")
+                        if clean_key not in os.environ:
+                            os.environ[clean_key] = clean_val
+            env_found = True
+            break
+        except Exception as e:
+            print(f"[Backend Env] Error reading {env_path}: {e}")
+
+if not env_found:
+    print("[Backend Env] No .env file found; relying on system/container environment variables.")
 
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -37,6 +50,13 @@ ModelManager.initialize_all_models()
 from services.image_pipeline_service import ImagePipelineService
 if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
     ImagePipelineService.start_background_watcher(interval_seconds=15)
+
+# Ensure no leftover testing data persists in database
+try:
+    from data.supabase_client import cleanup_test_data
+    cleanup_test_data()
+except Exception as _e:
+    pass
 
 
 # Register Blueprints for modular routes

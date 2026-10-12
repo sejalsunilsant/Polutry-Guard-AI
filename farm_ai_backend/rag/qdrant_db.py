@@ -17,10 +17,12 @@ if host and api_key and host != "your_qdrant_cloud_host" and api_key != "your_qd
     try:
         # Initialize client with Qdrant Cloud URL and API key
         client = QdrantClient(url=host, api_key=api_key)
-        
-        # Set lightweight embedding model (all-MiniLM-L6-v2 is standard, fast, and uses minimal memory)
-        # Using client.set_model() configures automatic text embedding for both add() and query()
-        client.set_model("sentence-transformers/all-MiniLM-L6-v2")
+        # If client supports fastembed set_model, configure it; otherwise use client directly
+        if hasattr(client, "set_model"):
+            try:
+                client.set_model("sentence-transformers/all-MiniLM-L6-v2")
+            except Exception as me:
+                print(f"[Qdrant] Note: Fastembed set_model skipped ({me})")
         print(f"[Qdrant] Initialized Qdrant Cloud client at: {host}")
     except Exception as e:
         print(f"[Qdrant] Error initializing Qdrant Cloud client: {e}")
@@ -53,6 +55,36 @@ def ensure_payload_indexes():
         print(f"[Qdrant] Error creating payload indexes: {e}")
 
 
+from fastembed import TextEmbedding
+from qdrant_client.models import PointStruct, VectorParams, Distance
+
+_embed_model = None
+
+def get_embed_model():
+    global _embed_model
+    if _embed_model is None:
+        try:
+            _embed_model = TextEmbedding(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        except Exception as e:
+            print(f"[Qdrant] Error initializing TextEmbedding: {e}")
+            _embed_model = None
+    return _embed_model
+
+
+def _embed_query(text: str):
+    model = get_embed_model()
+    if not model:
+        return None
+    try:
+        vecs = list(model.embed([text]))
+        if vecs and len(vecs) > 0:
+            vec = vecs[0]
+            return vec.tolist() if hasattr(vec, "tolist") else list(vec)
+    except Exception as e:
+        print(f"[Qdrant Embedding Error] Failed to embed text: {e}")
+    return None
+
+
 def search_knowledge_base(query, k=3):
     """
     Search Qdrant Cloud for the top k matching chunks (unfiltered — legacy).
@@ -68,22 +100,25 @@ def search_knowledge_base(query, k=3):
             print(f"[Qdrant Search] Warning: Collection '{collection_name}' does not exist.")
             return None
             
-        # Run query using query_text. QdrantClient handles the embedding generation internally!
-        import warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning)
-            results = client.query(
-                collection_name=collection_name,
-                query_text=query,
-                limit=k
-            )
+        query_vec = _embed_query(query)
+        if query_vec is None:
+            print("[Qdrant Search] Embedding generation failed. Falling back.")
+            return None
+
+        # Query points using query_points with fastembed vector
+        results = client.query_points(
+            collection_name=collection_name,
+            query=query_vec,
+            using="fast-all-minilm-l6-v2",
+            limit=k
+        )
         
         chunks = []
-        for res in results:
+        for res in results.points:
             # Check score to ensure relevance (cosine similarity threshold)
             if res.score > 0.35:
                 # Document content is stored in metadata/payload as 'document'
-                doc = res.document
+                doc = res.payload.get("document") if res.payload else None
                 if doc:
                     chunks.append(doc)
         return chunks
@@ -117,16 +152,6 @@ def search_knowledge_base_filtered(query, farmer_id=None, farm_id=None, batch_id
             print(f"[Qdrant Filtered Search] Warning: Collection '{collection_name}' does not exist.")
             return None
 
-        # Build filter: data_scope == "global" (always include reference KB)
-        # For now, only global docs exist. When farmer-specific docs are added,
-        # they will be filtered by farmer_id/farm_id/batch_id.
-        # Qdrant fastembed client.query() uses query_filter parameter.
-        
-        # Strategy: search with global filter first, then farmer-specific if IDs provided
-        # Using should (OR) conditions:
-        #   - data_scope == "global"
-        #   - (farmer_id == X AND farm_id == Y) [if provided]
-        
         from qdrant_client.models import Filter, FieldCondition, MatchValue
         
         should_conditions = [
@@ -134,29 +159,28 @@ def search_knowledge_base_filtered(query, farmer_id=None, farm_id=None, batch_id
         ]
         
         if farmer_id and farm_id:
-            # For farmer-specific docs, we need both farmer_id AND farm_id to match.
-            # We add this as a should-condition alongside global.
-            # Since Qdrant's should is OR, any doc matching global OR owned-by-farmer is returned.
             should_conditions.append(
                 FieldCondition(key="farmer_id", match=MatchValue(value=str(farmer_id)))
             )
 
         query_filter = Filter(should=should_conditions)
         
-        import warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning)
-            results = client.query(
-                collection_name=collection_name,
-                query_text=query,
-                query_filter=query_filter,
-                limit=k
-            )
+        query_vec = _embed_query(query)
+        if query_vec is None:
+            return search_knowledge_base(query, k=k)
+
+        results = client.query_points(
+            collection_name=collection_name,
+            query=query_vec,
+            using="fast-all-minilm-l6-v2",
+            query_filter=query_filter,
+            limit=k
+        )
         
         chunks = []
-        for res in results:
+        for res in results.points:
             if res.score > 0.35:
-                doc = res.document
+                doc = res.payload.get("document") if res.payload else None
                 if doc:
                     chunks.append(doc)
         
@@ -195,13 +219,18 @@ def upsert_document(doc_id, text, metadata):
             print(f"[Qdrant Upsert] Collection '{collection_name}' does not exist. Skipping.")
             return False
         
-        # client.add() handles embedding + upserting.
-        # We use the ids parameter to enable deterministic upsert.
-        client.add(
+        vec = _embed_query(text)
+        if vec is None:
+            return False
+
+        point = PointStruct(
+            id=str(uuid.UUID(hashlib.md5(doc_id.encode('utf-8')).hexdigest())),
+            vector={"fast-all-minilm-l6-v2": vec},
+            payload={"document": text, **metadata}
+        )
+        client.upsert(
             collection_name=collection_name,
-            documents=[text],
-            metadata=[metadata],
-            ids=[doc_id]
+            points=[point]
         )
         print(f"[Qdrant Upsert] Document '{doc_id}' upserted successfully.")
         return True
@@ -270,10 +299,10 @@ def recreate_and_index_collection(chunks_list, metadata_list=None):
             client.delete_collection(collection_name)
             print(f"[Qdrant Index] Deleted existing collection: {collection_name}")
             
-        # Recreate collection using local/cloud model config.
+        # Recreate collection using 384-d cosine vector params
         client.create_collection(
             collection_name=collection_name,
-            vectors_config=client.get_fastembed_vector_params()
+            vectors_config={"fast-all-minilm-l6-v2": VectorParams(size=384, distance=Distance.COSINE)}
         )
         
         # Build metadata: default all to global scope
@@ -281,12 +310,22 @@ def recreate_and_index_collection(chunks_list, metadata_list=None):
             metadata_list = [{"data_scope": "global", "data_type": "knowledge_base"} for _ in chunks_list]
         
         print(f"[Qdrant Index] Uploading {len(chunks_list)} text chunks to '{collection_name}'...")
-        # Add documents with metadata. client.add automatically extracts embeddings and pushes them.
-        client.add(
-            collection_name=collection_name,
-            documents=chunks_list,
-            metadata=metadata_list
-        )
+        points = []
+        for i, (chunk, meta) in enumerate(zip(chunks_list, metadata_list)):
+            vec = _embed_query(chunk)
+            if vec is not None:
+                pt_id = str(uuid.UUID(hashlib.md5(f"chunk_{i}_{chunk[:30]}".encode('utf-8')).hexdigest()))
+                points.append(PointStruct(
+                    id=pt_id,
+                    vector={"fast-all-minilm-l6-v2": vec},
+                    payload={"document": chunk, **meta}
+                ))
+        
+        if points:
+            client.upsert(
+                collection_name=collection_name,
+                points=points
+            )
         print("[Qdrant Index] Indexing completed successfully!")
         
         # Create payload indexes for efficient filtering

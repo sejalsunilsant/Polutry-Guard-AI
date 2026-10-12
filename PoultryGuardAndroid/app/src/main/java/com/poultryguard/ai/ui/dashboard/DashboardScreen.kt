@@ -277,90 +277,97 @@ fun DashboardContent(
     ) {
 
 
-        // Live AI Disease Risk Level Indicator Widget
-        item {
-            val prediction = state.diseasePrediction
-            val riskColor = when (prediction.riskLevel) {
-                DiseaseRiskLevel.LOW -> GreenPrimary
-                DiseaseRiskLevel.MEDIUM -> AlertOrange
-                DiseaseRiskLevel.HIGH -> AlertRed
-            }
-            val riskBg = when (prediction.riskLevel) {
-                DiseaseRiskLevel.LOW -> GreenLight
-                DiseaseRiskLevel.MEDIUM -> Color(0xFFFFF3E0)
-                DiseaseRiskLevel.HIGH -> Color(0xFFFFEBEE)
-            }
-            val riskIcon = when (prediction.riskLevel) {
-                DiseaseRiskLevel.LOW -> Icons.Default.VerifiedUser
-                DiseaseRiskLevel.MEDIUM -> Icons.Default.Shield
-                DiseaseRiskLevel.HIGH -> Icons.Default.Coronavirus
-            }
-            val riskLabel = when (prediction.riskLevel) {
-                DiseaseRiskLevel.LOW -> "LOW RISK - FLOCK SECURE"
-                DiseaseRiskLevel.MEDIUM -> "MEDIUM RISK - ATTENTION REQUIRED"
-                DiseaseRiskLevel.HIGH -> "HIGH RISK - AI RESPIRATORY ALERT!"
-            }
+        // Live AI Disease Risk Level Indicator Widget (displayed only when an active flock is in the shed)
+        if (state.activeBatch != null) {
+            item {
+                val prediction = state.diseasePrediction
+                val riskColor = when (prediction.riskLevel) {
+                    DiseaseRiskLevel.LOW -> GreenPrimary
+                    DiseaseRiskLevel.MEDIUM -> AlertOrange
+                    DiseaseRiskLevel.HIGH, DiseaseRiskLevel.CRITICAL -> AlertRed
+                    else -> GreenPrimary
+                }
+                val riskBg = when (prediction.riskLevel) {
+                    DiseaseRiskLevel.LOW -> GreenLight
+                    DiseaseRiskLevel.MEDIUM -> Color(0xFFFFF3E0)
+                    DiseaseRiskLevel.HIGH, DiseaseRiskLevel.CRITICAL -> Color(0xFFFFEBEE)
+                    else -> GreenLight
+                }
+                val riskIcon = when (prediction.riskLevel) {
+                    DiseaseRiskLevel.LOW -> Icons.Default.VerifiedUser
+                    DiseaseRiskLevel.MEDIUM -> Icons.Default.Shield
+                    DiseaseRiskLevel.HIGH, DiseaseRiskLevel.CRITICAL -> Icons.Default.Coronavirus
+                    else -> Icons.Default.VerifiedUser
+                }
+                val riskLabel = when (prediction.riskLevel) {
+                    DiseaseRiskLevel.LOW -> "LOW RISK - FLOCK SECURE"
+                    DiseaseRiskLevel.MEDIUM -> "MEDIUM RISK - ATTENTION REQUIRED"
+                    DiseaseRiskLevel.HIGH -> "HIGH RISK - AI RESPIRATORY ALERT!"
+                    DiseaseRiskLevel.CRITICAL -> "CRITICAL RISK - IMMEDIATE ACTION REQUIRED!"
+                    else -> "LOW RISK - FLOCK SECURE"
+                }
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = riskBg),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                border = CardDefaults.outlinedCardBorder().copy(
-                    brush = SolidColor(riskColor.copy(alpha = 0.4f))
-                )
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(riskColor.copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = riskIcon,
-                                    contentDescription = "Disease Risk",
-                                    tint = riskColor,
-                                    modifier = Modifier.size(20.dp)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = riskBg),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        brush = SolidColor(riskColor.copy(alpha = 0.4f))
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(riskColor.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = riskIcon,
+                                        contentDescription = "Disease Risk",
+                                        tint = riskColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = riskLabel,
+                                    style = Typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = riskColor,
+                                    letterSpacing = 0.5.sp
                                 )
                             }
-                            Spacer(modifier = Modifier.width(10.dp))
+
                             Text(
-                                text = riskLabel,
-                                style = Typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
+                                text = "AI Confidence: ${(prediction.confidence * 100).toInt()}%",
+                                style = Typography.labelMedium,
                                 color = riskColor,
-                                letterSpacing = 0.5.sp
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .background(riskColor.copy(alpha = 0.08f), shape = RoundedCornerShape(100.dp))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
                             )
                         }
 
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
                         Text(
-                            text = "AI Confidence: ${(prediction.confidence * 100).toInt()}%",
-                            style = Typography.labelMedium,
-                            color = riskColor,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .background(riskColor.copy(alpha = 0.08f), shape = RoundedCornerShape(100.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                            text = prediction.recommendation,
+                            style = Typography.bodyMedium,
+                            color = TextDark,
+                            fontWeight = FontWeight.Medium,
+                            lineHeight = 20.sp
                         )
                     }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    Text(
-                        text = prediction.recommendation,
-                        style = Typography.bodyMedium,
-                        color = TextDark,
-                        fontWeight = FontWeight.Medium,
-                        lineHeight = 20.sp
-                    )
                 }
             }
         }

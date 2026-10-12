@@ -1,0 +1,26 @@
+# Docker build ignore file
+.env
+.env.*
+*.env
+*.pem
+*.key
+*serviceAccount*.json
+*service-account*.json
+*firebase-adminsdk*.json
+serviceAccountKey.json
+firebase_credentials.json
+
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+
+tests/
+*.log
+.git
+.gitignore
+.vscode
+.idea

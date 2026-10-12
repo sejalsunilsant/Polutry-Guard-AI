@@ -94,8 +94,9 @@ fun AlertsScreen(
     var consultations by remember { mutableStateOf<List<com.poultryguard.ai.data.model.Consultation>>(emptyList()) }
 
     val cachedUser = remember { cacheManager.getCachedUserProfile() }
+    val cachedBatch = remember { cacheManager.getCachedActiveBatch() }
     val farmerId = cachedUser?.uid ?: ""
-    val activeBatchId = (uiState as? DashboardUiState.Success)?.activeBatch?.id ?: ""
+    val activeBatchId = (uiState as? DashboardUiState.Success)?.activeBatch?.id?.takeIf { it.isNotBlank() } ?: cachedBatch?.id ?: ""
 
     LaunchedEffect(Unit) {
         cachedEvents = cacheManager.getCachedFarmEvents()
@@ -114,24 +115,37 @@ fun AlertsScreen(
         if (activeBatchId.isNotEmpty()) {
             caseRepository.syncAlerts(activeBatchId)
             caseRepository.syncCases(batchId = activeBatchId)
+        } else {
+            caseRepository.syncAlerts()
+            caseRepository.syncCases()
         }
     }
     LaunchedEffect(activeBatchId) {
         if (activeBatchId.isNotEmpty()) {
             caseRepository.getCasesForBatchFlow(activeBatchId).collect { cases ->
-                veterinaryCases = cases
+                if (cases.isNotEmpty()) {
+                    veterinaryCases = cases
+                } else {
+                    caseRepository.getAllCasesFlow().collect { allCases ->
+                        veterinaryCases = allCases
+                    }
+                }
             }
         } else {
-            veterinaryCases = emptyList()
+            caseRepository.getAllCasesFlow().collect { cases ->
+                veterinaryCases = cases
+            }
         }
     }
     LaunchedEffect(activeBatchId) {
         if (activeBatchId.isNotEmpty()) {
             caseRepository.getAlertsForBatchFlow(activeBatchId).collect { list ->
-                alerts = list
+                alerts = if (list.isNotEmpty()) list else alerts
             }
         } else {
-            alerts = emptyList()
+            caseRepository.getAllAlertsFlow().collect { list ->
+                alerts = list
+            }
         }
     }
     LaunchedEffect(farmerId) {
@@ -813,13 +827,15 @@ fun AlertsScreen(
                             modifier = Modifier.padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            val cardTitle = if (case.alertId == null) "General Veterinary Consultation" else (alert?.title ?: "Disease Alert Case")
+                            val cardDesc = if (case.alertId == null) "General health consultation for this flock batch." else (alert?.description ?: "Awaiting system alert details.")
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = alert?.title ?: "Disease Alert Case",
+                                    text = cardTitle,
                                     style = Typography.bodyLarge,
                                     fontWeight = FontWeight.Bold,
                                     color = TextDark
@@ -828,49 +844,49 @@ fun AlertsScreen(
                                     "PENDING" -> AlertOrange
                                     "ASSIGNED" -> BlueSecondary
                                     "DIAGNOSED" -> GreenPrimary
-                                    "RESOLVED" -> Color.DarkGray
+                                    "RESOLVED" -> androidx.compose.ui.graphics.Color(0xFF2E7D32)
                                     else -> TextMedium
                                 }
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(statusColor.copy(alpha = 0.1f))
+                                        .background(statusColor.copy(alpha = 0.12f))
                                         .padding(horizontal = 8.dp, vertical = 2.dp)
                                 ) {
                                     Text(
                                         text = case.status,
                                         color = statusColor,
-                                        fontSize = 10.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
                             }
                             
                             Text(
-                                text = alert?.description ?: "Awaiting system alert details.",
+                                text = cardDesc,
                                 style = Typography.bodyMedium,
                                 color = TextMedium
                             )
 
-                            if (case.diagnosis != null || case.treatment != null || case.recommendation != null) {
+                            if (!case.diagnosis.isNullOrBlank() || !case.treatment.isNullOrBlank() || !case.recommendation.isNullOrBlank() || !case.followUpInstructions.isNullOrBlank()) {
                                 Divider(color = DividerColor)
                                 Text(
-                                    text = "Clinical Response",
+                                    text = "Clinical Response & Prescriptions",
                                     style = Typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = GreenPrimary
                                 )
-                                if (case.diagnosis != null) {
-                                    Text(text = "• Diagnosis: ${case.diagnosis}", style = Typography.bodySmall, color = TextDark)
+                                if (!case.diagnosis.isNullOrBlank()) {
+                                    Text(text = "• Diagnosis: ${case.diagnosis}", style = Typography.bodyMedium, fontWeight = FontWeight.Bold, color = AlertOrange)
                                 }
-                                if (case.treatment != null) {
-                                    Text(text = "• Treatment/Prescription: ${case.treatment}", style = Typography.bodySmall, color = TextDark)
+                                if (!case.treatment.isNullOrBlank()) {
+                                    Text(text = "• Treatment/Prescription: ${case.treatment}", style = Typography.bodyMedium, fontWeight = FontWeight.Bold, color = GreenPrimary)
                                 }
-                                if (case.recommendation != null) {
+                                if (!case.recommendation.isNullOrBlank()) {
                                     Text(text = "• Recommendation: ${case.recommendation}", style = Typography.bodySmall, color = TextDark)
                                 }
-                                if (case.followUpInstructions != null) {
-                                    Text(text = "• Follow-up: ${case.followUpInstructions}", style = Typography.bodySmall, color = TextDark)
+                                if (!case.followUpInstructions.isNullOrBlank()) {
+                                    Text(text = "• Follow-up Instructions: ${case.followUpInstructions}", style = Typography.bodySmall, color = TextDark)
                                 }
                             } else {
                                 Text(
@@ -1645,7 +1661,8 @@ fun GuardianMlDiagnosticsCard(
                     )
 
                     if (result.riskLevel == com.poultryguard.ai.data.api.DiseaseRiskLevel.MEDIUM ||
-                        result.riskLevel == com.poultryguard.ai.data.api.DiseaseRiskLevel.HIGH
+                        result.riskLevel == com.poultryguard.ai.data.api.DiseaseRiskLevel.HIGH ||
+                        result.riskLevel == com.poultryguard.ai.data.api.DiseaseRiskLevel.CRITICAL
                     ) {
                         var reviewRequested by remember { mutableStateOf(false) }
                         

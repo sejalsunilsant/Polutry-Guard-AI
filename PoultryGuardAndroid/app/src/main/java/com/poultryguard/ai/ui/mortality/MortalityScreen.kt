@@ -126,7 +126,8 @@ fun MortalityScreen(
             vetRepository.syncVeterinarians()
         }
         val userProfile = cacheManager.getCachedUserProfile()
-        userProfile?.farmId?.let { farmId ->
+        val farmId = userProfile?.farmId?.takeIf { it.isNotBlank() } ?: userProfile?.uid ?: ""
+        if (farmId.isNotBlank()) {
             val res = batchRepository.getActiveBatch(farmId)
             res.fold(
                 onSuccess = { batch ->
@@ -494,7 +495,9 @@ fun MortalityScreen(
             if (localBatch != null) {
                 val verifiedVets = veterinarians.filter { it.verificationStatus == "VERIFIED" }
                 val activeAlert = alerts.find { it.batchId == activeBatchId && it.status == "UNRESOLVED" && !it.title.contains("Healthy", ignoreCase = true) }
-                val activeCase = cases.find { it.batchId == activeBatchId && it.status != "RESOLVED" }
+                val batchCases = cases.filter { if (activeBatchId.isNotBlank()) it.batchId == activeBatchId else true }
+                // Prioritize an active unresolved case; if all are resolved, show the most recent case so diagnosis & treatment remain visible
+                val activeCase = batchCases.find { it.status != "RESOLVED" } ?: batchCases.maxByOrNull { it.createdAt }
                 android.util.Log.d("MortScreen", "VetAssist: verifiedVets.size=${verifiedVets.size}, activeCase=${activeCase?.id}, activeAlert=${activeAlert?.id}")
                 veterinarians.forEach { v ->
                     android.util.Log.d("MortScreen", "  vet: id=${v.id}, name=${v.name}, verificationStatus='${v.verificationStatus}'")
@@ -509,6 +512,14 @@ fun MortalityScreen(
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val statusColor = when (activeCase?.status) {
+                            "PENDING" -> AlertOrange
+                            "ASSIGNED" -> BlueSecondary
+                            "DIAGNOSED" -> GreenPrimary
+                            "RESOLVED" -> androidx.compose.ui.graphics.Color(0xFF2E7D32)
+                            else -> TextMedium
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -518,13 +529,13 @@ fun MortalityScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(if (activeCase != null) AlertOrange.copy(alpha = 0.1f) else GreenPrimary.copy(alpha = 0.1f))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    .background(if (activeCase != null) statusColor.copy(alpha = 0.12f) else GreenPrimary.copy(alpha = 0.1f))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
                                 Text(
-                                    text = if (activeCase != null) "Request Open (${activeCase.status})" else "No Active Request",
-                                    color = if (activeCase != null) AlertOrange else GreenPrimary,
-                                    fontSize = 10.sp,
+                                    text = if (activeCase != null) "Status: ${activeCase.status}" else "No Active Request",
+                                    color = if (activeCase != null) statusColor else GreenPrimary,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -534,20 +545,58 @@ fun MortalityScreen(
 
                         if (activeCase != null) {
                             val assignedVet = veterinarians.find { it.id == activeCase.veterinarianId }
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("Status: An active consultation is open for this batch.", style = Typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                if (assignedVet != null) {
-                                    Text("Assigned Vet: ${assignedVet.name} (${assignedVet.specialty})", style = Typography.bodyMedium, color = TextMedium)
-                                    Text("Phone: ${assignedVet.phone}", style = Typography.bodySmall, color = TextMedium)
-                                } else {
-                                    Text("Assigned Vet: Waiting for claims...", style = Typography.bodyMedium, color = TextMedium)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                val statusExplanation = when (activeCase.status) {
+                                    "PENDING" -> "Request registered. Awaiting a veterinarian to claim."
+                                    "ASSIGNED" -> "Veterinarian has claimed this case and is reviewing flock data."
+                                    "DIAGNOSED" -> "Clinical diagnosis and treatment plan submitted by Veterinarian."
+                                    "RESOLVED" -> "Consultation completed and resolved."
+                                    else -> "Status: ${activeCase.status}"
                                 }
-                                if (activeCase.diagnosis != null) {
-                                    Text("Diagnosis: ${activeCase.diagnosis}", style = Typography.bodyMedium, fontWeight = FontWeight.Bold, color = AlertOrange)
-                                    Text("Recommendation: ${activeCase.recommendation}", style = Typography.bodySmall, color = TextDark)
+                                Text("• Status Note: $statusExplanation", style = Typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = TextDark)
+                                if (assignedVet != null) {
+                                    Text("• Assigned Vet: ${assignedVet.name} (${assignedVet.specialty})", style = Typography.bodyMedium, color = TextMedium)
+                                    Text("• Phone: ${assignedVet.phone ?: "Not provided"}", style = Typography.bodySmall, color = TextMedium)
+                                } else {
+                                    Text("• Assigned Vet: Waiting for claims...", style = Typography.bodyMedium, color = TextMedium)
+                                }
+
+                                if (!activeCase.diagnosis.isNullOrBlank() || !activeCase.treatment.isNullOrBlank() || !activeCase.recommendation.isNullOrBlank() || !activeCase.followUpInstructions.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Divider(color = DividerColor)
+                                    Text("Clinical Review & Medical Findings", style = Typography.bodyMedium, fontWeight = FontWeight.Bold, color = GreenPrimary)
+
+                                    if (!activeCase.diagnosis.isNullOrBlank()) {
+                                        Text("• Clinical Diagnosis: ${activeCase.diagnosis}", style = Typography.bodyMedium, fontWeight = FontWeight.Bold, color = AlertOrange)
+                                    }
+                                    if (!activeCase.treatment.isNullOrBlank()) {
+                                        Text("• Treatment / Prescription: ${activeCase.treatment}", style = Typography.bodyMedium, fontWeight = FontWeight.Bold, color = GreenPrimary)
+                                    }
+                                    if (!activeCase.recommendation.isNullOrBlank()) {
+                                        Text("• General Recommendations: ${activeCase.recommendation}", style = Typography.bodySmall, color = TextDark)
+                                    }
+                                    if (!activeCase.followUpInstructions.isNullOrBlank()) {
+                                        Text("• Follow-up Instructions: ${activeCase.followUpInstructions}", style = Typography.bodySmall, color = TextDark)
+                                    }
+                                } else {
+                                    Text(
+                                        text = "Awaiting clinical investigation, diagnosis, and treatment from Veterinarian.",
+                                        style = Typography.labelMedium,
+                                        color = AlertOrange,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
-                        } else {
+                        }
+
+                        // Allow requesting consultation if no open/active request or if previous is resolved
+                        if (activeCase == null || activeCase.status == "RESOLVED") {
+                            if (activeCase != null && activeCase.status == "RESOLVED") {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Divider(color = DividerColor)
+                                Text("Request New Consultation", style = Typography.titleSmall, fontWeight = FontWeight.Bold, color = TextDark)
+                            }
+
                             if (verifiedVets.isEmpty()) {
                                 Text("No verified veterinarians available near you at the moment.", style = Typography.bodyMedium, color = TextMedium)
                             } else {

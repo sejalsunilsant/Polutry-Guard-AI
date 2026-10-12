@@ -113,14 +113,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             val db = com.poultryguard.ai.data.cache.AppDatabase.getDatabase(getApplication())
             val farmerProfile = user?.email?.let { db.farmerProfileDao().getFarmerByEmail(it) }
             
-            if (farmerProfile != null) {
-                farmerId = farmerProfile.id
-                deviceId = farmerProfile.deviceId
-            } else {
-                farmerId = user?.uid ?: ""
-                deviceId = ""
-            }
-            farmId = user?.farmId ?: farmerId
+            // Prioritize authenticated user UID over stale local DB records
+            farmerId = user?.uid?.takeIf { it.isNotBlank() } ?: farmerProfile?.id ?: ""
+            deviceId = farmerProfile?.deviceId ?: ""
+            farmId = user?.farmId?.takeIf { it.isNotBlank() } ?: farmerId
 
             // Fetch authoritative farm/device context from backend (mirrors refreshData logic)
             if (user != null && farmerId.isNotBlank()) {
@@ -128,7 +124,12 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                     val authRepo = com.poultryguard.ai.data.repository.SupabaseAuthRepository(getApplication())
                     val contextResult = authRepo.fetchUserContext(farmerId)
                     contextResult.onSuccess { dto ->
-                        farmId = dto.farmId ?: farmId
+                        dto.farmId?.takeIf { it.isNotBlank() }?.let { fetchedFarmId ->
+                            farmId = fetchedFarmId
+                            if (user.farmId != fetchedFarmId) {
+                                cacheManager.cacheUserProfile(user.copy(farmId = fetchedFarmId))
+                            }
+                        }
                         deviceId = dto.deviceId ?: deviceId
                     }
                 } catch (e: Exception) {
@@ -176,14 +177,16 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
 
     fun loadLatestPrediction() {
-        if (deviceId.isBlank()) return
+        if (deviceId.isBlank() || activeBatch == null) return
         viewModelScope.launch {
             val result = diseaseRepository.getLatestPrediction(
                 deviceId = deviceId
             )
             result.onSuccess { prediction ->
-                currentPrediction = prediction
-                updateDashboardState()
+                if (activeBatch != null) {
+                    currentPrediction = prediction
+                    updateDashboardState()
+                }
             }
         }
     }
@@ -275,10 +278,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 0
             }
             val context = FarmContext(
-                currentTemperature = currentTemp ?: 0f,
-                currentHumidity = currentHumid ?: 0f,
-                currentAmmonia = currentAmmonia ?: 0f,
-                currentSoundLevel = currentSound ?: 0f,
+                currentTemperature = currentTemp,
+                currentHumidity = currentHumid,
+                currentAmmonia = currentAmmonia,
+                currentSoundLevel = currentSound,
                 birdCount = dynamicBirdCount,
                 loggedMortalities = unsyncedMortalities,
                 activeShed = currentBatch?.let { "${it.id} (${it.breed})" } ?: "No Active Batch",
@@ -312,7 +315,14 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                     val contextResult = authRepo.fetchUserContext(user.uid)
                     contextResult.onSuccess { dto ->
                         farmerId = dto.profileId
-                        farmId = dto.farmId ?: ""
+                        dto.farmId?.takeIf { it.isNotBlank() }?.let { fetchedFarmId ->
+                            farmId = fetchedFarmId
+                            if (user.farmId != fetchedFarmId) {
+                                cacheManager.cacheUserProfile(user.copy(farmId = fetchedFarmId))
+                            }
+                        } ?: run {
+                            farmId = dto.farmId ?: ""
+                        }
                         deviceId = dto.deviceId ?: ""
                     }
                 } catch (e: Exception) {
@@ -381,6 +391,11 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             result.onSuccess {
                 activeBatch = null
                 unsyncedMortalities = 0
+                currentPrediction = DiseasePredictionResponse(
+                    riskLevel = DiseaseRiskLevel.LOW,
+                    confidence = 0.0f,
+                    recommendation = "No active batch running"
+                )
                 updateDashboardState()
                 onSuccess()
             }
