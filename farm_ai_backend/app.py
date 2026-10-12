@@ -71,7 +71,7 @@ app.register_blueprint(admin_bp)
 def root():
     return jsonify({
         "status": "online",
-        "service": "PoultryGuard AI Backend API",
+        "service": "PoultryGuard AI Backend API Done",
         "health": "/health"
     }), 200
 
