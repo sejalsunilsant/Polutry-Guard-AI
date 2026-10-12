@@ -84,13 +84,7 @@ interface FlaskChatApi {
 class ChatService(private val apiKey: String) {
 
     private val api: FlaskChatApi by lazy {
-        val baseUrl = if (android.os.Build.FINGERPRINT.startsWith("generic")
-            || android.os.Build.MODEL.contains("Emulator")
-            || android.os.Build.DEVICE.startsWith("generic")) {
-            "http://10.0.2.2:5000/"        // Emulator
-        } else {
-            "http://10.84.52.78:5000/"     // Physical device
-        }
+        val baseUrl = "https://polutry-guard-ai.onrender.com/"
         Retrofit.Builder()
             .baseUrl(baseUrl)
             .addConverterFactory(GsonConverterFactory.create())
