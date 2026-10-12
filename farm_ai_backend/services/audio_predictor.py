@@ -28,15 +28,16 @@ class AudioPredictor:
 
     def _resolve_model_paths(self):
         base_dir = os.path.dirname(os.path.abspath(__file__))
+        backend_dir = os.path.abspath(os.path.join(base_dir, ".."))
         candidate_model_paths = [
-            os.path.join(base_dir, "..", "ml", "model", "sound_xgb_model.json"),
-            os.path.join(base_dir, "..", "..", "ML_Models", "sound_xgb_model.json"),
-            os.path.abspath(os.path.join(base_dir, "..", "ml", "model", "sound_xgb_model.json")),
-            os.path.abspath(os.path.join(base_dir, "..", "..", "ML_Models", "sound_xgb_model.json"))
+            os.path.join(backend_dir, "ml", "model", "sound_xgb_model.json"),
+            os.path.join(backend_dir, "ML_Models", "sound_xgb_model.json"),
+            os.path.join(backend_dir, "..", "ML_Models", "sound_xgb_model.json"),
         ]
         candidate_class_paths = [
-            os.path.join(base_dir, "..", "ml", "model", "sound_classes.json"),
-            os.path.join(base_dir, "..", "..", "ML_Models", "sound_classes.json")
+            os.path.join(backend_dir, "ml", "model", "sound_classes.json"),
+            os.path.join(backend_dir, "ML_Models", "sound_classes.json"),
+            os.path.join(backend_dir, "..", "ML_Models", "sound_classes.json"),
         ]
 
         model_path = next((p for p in candidate_model_paths if os.path.exists(p)), None)
