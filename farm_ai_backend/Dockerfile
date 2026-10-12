@@ -7,7 +7,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TF_ENABLE_ONEDNN_OPTS=0 \
-    PORT=5000 \
+    PORT=10000 \
     HOST=0.0.0.0
 
 # Install system dependencies for audio processing, network queries, and health checks
@@ -35,12 +35,12 @@ COPY . .
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Expose backend API port
-EXPOSE 5000
+# Expose backend API port (Render uses 10000 by default, 5000 as fallback)
+EXPOSE 10000 5000
 
 # Health check to ensure server is ready to accept traffic
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:5000/health || exit 1
+    CMD curl -f http://localhost:${PORT:-10000}/health || exit 1
 
-# Launch with Gunicorn production WSGI server
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "120", "app:app"]
+# Launch with Gunicorn production WSGI server dynamically binding to Render's PORT
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-10000} --workers 1 --threads 4 --timeout 120 app:app"]

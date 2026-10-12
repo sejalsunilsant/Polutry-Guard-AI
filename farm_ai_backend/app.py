@@ -67,6 +67,14 @@ app.register_blueprint(batch_bp)
 app.register_blueprint(user_bp)
 app.register_blueprint(admin_bp)
 
+@app.route('/', methods=['GET'])
+def root():
+    return jsonify({
+        "status": "online",
+        "service": "PoultryGuard AI Backend API Done",
+        "health": "/health"
+    }), 200
+
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({
