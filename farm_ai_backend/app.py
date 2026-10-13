@@ -62,6 +62,14 @@ def _initialize_async_services():
     except Exception as e:
         print(f"[Async Startup] Note starting background watcher: {e}")
 
+    try:
+        if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+            from scheduler import start_background_scheduler
+            poll_interval = int(os.environ.get("TELEMETRY_POLL_INTERVAL", "20"))
+            start_background_scheduler(interval_seconds=poll_interval)
+    except Exception as e:
+        print(f"[Async Startup] Note starting telemetry scheduler: {e}")
+
 _startup_thread = threading.Thread(target=_initialize_async_services, daemon=True, name="AsyncStartupThread")
 _startup_thread.start()
 

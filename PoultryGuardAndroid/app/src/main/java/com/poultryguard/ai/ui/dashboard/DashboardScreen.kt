@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.poultryguard.ai.data.api.DiseaseRiskLevel
@@ -322,7 +323,10 @@ fun DashboardContent(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1f, fill = false),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Box(
                                     modifier = Modifier
                                         .size(36.dp)
@@ -343,19 +347,24 @@ fun DashboardContent(
                                     style = Typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = riskColor,
-                                    letterSpacing = 0.5.sp
+                                    letterSpacing = 0.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
-                            Text(
-                                text = "AI Confidence: ${(prediction.confidence * 100).toInt()}%",
-                                style = Typography.labelMedium,
-                                color = riskColor,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier
-                                    .background(riskColor.copy(alpha = 0.08f), shape = RoundedCornerShape(100.dp))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
+                            if (prediction.confidence > 0.05f) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${(prediction.confidence * 100).toInt()}% Conf",
+                                    style = Typography.labelMedium,
+                                    color = riskColor,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .background(riskColor.copy(alpha = 0.08f), shape = RoundedCornerShape(100.dp))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
@@ -486,72 +495,126 @@ fun DashboardContent(
                         
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column {
-                                Text(
-                                    text = stringResource("initial_count"),
-                                    style = Typography.labelMedium,
-                                    color = TextMedium
-                                )
-                                Text(
-                                    text = batch.initialCount.toString(),
-                                    style = Typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextDark
-                                )
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                color = AppBackground,
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = stringResource("initial_count"),
+                                        style = Typography.labelSmall,
+                                        color = TextMedium,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        lineHeight = 13.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = batch.initialCount.toString(),
+                                        style = Typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextDark
+                                    )
+                                }
                             }
-                            Column {
-                                Text(
-                                    text = stringResource("current_count"),
-                                    style = Typography.labelMedium,
-                                    color = TextMedium
-                                )
-                                Text(
-                                    text = state.birdCount.toString(),
-                                    style = Typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextDark
-                                )
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                color = AppBackground,
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = stringResource("current_count"),
+                                        style = Typography.labelSmall,
+                                        color = TextMedium,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        lineHeight = 13.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = state.birdCount.toString(),
+                                        style = Typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextDark
+                                    )
+                                }
                             }
-                            Column {
-                                Text(
-                                    text = stringResource("mortality_rate"),
-                                    style = Typography.labelMedium,
-                                    color = TextMedium
-                                )
-                                val mortRate = if (batch.initialCount > 0) {
-                                    ((batch.initialCount - state.birdCount).toFloat() / batch.initialCount * 100).coerceAtLeast(0f)
-                                } else 0f
-                                Text(
-                                    text = "%.2f%%".format(mortRate),
-                                    style = Typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = AlertRed
-                                )
+                            Surface(
+                                modifier = Modifier.weight(1f),
+                                color = AppBackground,
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = stringResource("mortality_rate"),
+                                        style = Typography.labelSmall,
+                                        color = TextMedium,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        lineHeight = 13.sp
+                                    )
+                                    val mortRate = if (batch.initialCount > 0) {
+                                        ((batch.initialCount - state.birdCount).toFloat() / batch.initialCount * 100).coerceAtLeast(0f)
+                                    } else 0f
+                                    val mortColor = if (mortRate > 3f) AlertRed else if (mortRate > 1f) AlertOrange else TextDark
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "%.2f%%".format(mortRate),
+                                        style = Typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = mortColor
+                                    )
+                                }
                             }
                         }
                         
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Button(
-                                onClick = { onCloseBatchClick(batch) },
-                                colors = ButtonDefaults.buttonColors(containerColor = AlertRed),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(stringResource("close_batch"), color = Color.White, fontSize = 13.sp)
-                            }
                             OutlinedButton(
-                                onClick = onNavigateToBatchHistory,
-                                border = BorderStroke(1.dp, GreenPrimary),
-                                shape = RoundedCornerShape(8.dp),
+                                onClick = { onCloseBatchClick(batch) },
+                                border = BorderStroke(1.dp, AlertRed.copy(alpha = 0.7f)),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = AlertRed),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text(stringResource("batch_history"), color = GreenPrimary, fontSize = 13.sp)
+                                Text(
+                                    text = stringResource("close_batch"),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Button(
+                                onClick = onNavigateToBatchHistory,
+                                colors = ButtonDefaults.buttonColors(containerColor = GreenPrimary),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = stringResource("batch_history"),
+                                    color = Color.White,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }

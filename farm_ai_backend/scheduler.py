@@ -43,8 +43,10 @@ def clean_and_parse_ts(ts_str):
     except Exception:
         return None
 
-def run_ingestion():
-    print("[Scheduler] Telemetry Ingestion Job Started.")
+def run_ingestion(poll_interval: int = None):
+    if poll_interval is None:
+        poll_interval = int(os.environ.get("TELEMETRY_POLL_INTERVAL", "20"))
+    print(f"[Scheduler] Telemetry Ingestion Job Started (polling every {poll_interval}s).")
     while True:
         try:
             devices = get_devices_with_thingspeak()
@@ -57,58 +59,73 @@ def run_ingestion():
                 if not channel_id:
                     continue
                     
-                # 1. Fetch latest feed from ThingSpeak
+                # 1. Fetch latest feeds from ThingSpeak (up to 10 feeds to catch intermediate entries)
                 try:
-                    feed_data = ThingSpeakService.fetch_latest_feed(channel_id, read_key)
-                    parsed = ThingSpeakService.parse_and_map_data(feed_data)
-                    validated = ThingSpeakService.validate_data(parsed)
+                    feed_data = ThingSpeakService.fetch_latest_feed(channel_id, read_key, results=10)
                 except Exception as ex:
-                    print(f"[Scheduler] Failed to fetch/parse ThingSpeak feed for device {device_id}: {ex}")
+                    print(f"[Scheduler] Failed to fetch ThingSpeak feed for device {device_id}: {ex}")
                     continue
                     
-                # 2. Check duplicate using feed timestamp
-                feed_list = feed_data.get("feeds", [])
-                if not feed_list:
+                feeds = feed_data.get("feeds", [])
+                if not feeds:
                     continue
-                feed_created_at_str = feed_list[0].get("created_at")
+                    
+                channel_info = feed_data.get("channel", {})
                 
                 # Get last telemetry record from DB
                 last_telemetry = get_last_telemetry(device_id)
-                
-                feed_time = clean_and_parse_ts(feed_created_at_str)
                 last_db_time = None
                 if last_telemetry and last_telemetry.get("created_at"):
                     last_db_time = clean_and_parse_ts(last_telemetry["created_at"])
                     
-                # Skip if duplicate or older
-                if feed_time and last_db_time and feed_time <= last_db_time:
-                    continue
+                # Process uningested feeds in chronological order
+                for feed in feeds:
+                    feed_created_at_str = feed.get("created_at")
+                    if not feed_created_at_str:
+                        continue
+                        
+                    feed_time = clean_and_parse_ts(feed_created_at_str)
+                    if feed_time and last_db_time and feed_time <= last_db_time:
+                        continue
+                        
+                    try:
+                        parsed = ThingSpeakService.parse_and_map_feed(channel_info, feed)
+                        validated = ThingSpeakService.validate_data(parsed)
+                    except Exception as p_err:
+                        print(f"[Scheduler] Could not parse feed entry {feed.get('entry_id')}: {p_err}")
+                        continue
+                        
+                    temp = validated.get("temperature")
+                    hum = validated.get("humidity")
+                    ammonia = validated.get("ammonia")
                     
-                # 3. Save telemetry to DB
-                temp = validated.get("temperature")
-                hum = validated.get("humidity")
-                ammonia = validated.get("ammonia")
-                sound_level = 50.0  # Default sound level
-                sound_url = validated.get("sound_url")
-                image_url = validated.get("image_url")
-                
-                save_telemetry(
-                    device_id=device_id,
-                    temperature=temp,
-                    humidity=hum,
-                    ammonia=ammonia,
-                    sound_level=sound_level,
-                    farm_id=farm_id,
-                    sound_url=sound_url,
-                    image_url=image_url,
-                    created_at=feed_created_at_str
-                )
-                print(f"[Scheduler] Successfully ingested new telemetry for device {device_id} at {feed_created_at_str}")
-                
+                    if temp is None or hum is None:
+                        continue
+                    if ammonia is None:
+                        ammonia = 0.0
+                        
+                    sound_level = validated.get("sound_level", 50.0)
+                    sound_url = validated.get("sound_url")
+                    image_url = validated.get("image_url")
+                    
+                    save_telemetry(
+                        device_id=device_id,
+                        temperature=temp,
+                        humidity=hum,
+                        ammonia=ammonia,
+                        sound_level=sound_level,
+                        farm_id=farm_id,
+                        sound_url=sound_url,
+                        image_url=image_url,
+                        created_at=feed_created_at_str
+                    )
+                    last_db_time = feed_time
+                    print(f"[Scheduler] Successfully ingested telemetry for device {device_id} (feed {feed.get('entry_id')}) at {feed_created_at_str}")
+                    
         except Exception as e:
             print(f"[Scheduler] Ingestion error: {e}")
             
-        time.sleep(300)  # Sleep for 5 minutes
+        time.sleep(poll_interval)
 
 def run_aggregation_and_cleanup():
     print("[Scheduler] Daily Aggregation & Cleanup Job Started.")
@@ -213,13 +230,29 @@ def run_aggregation_and_cleanup():
             
         time.sleep(3600)  # Sleep for 1 hour
 
+_scheduler_started = False
+_scheduler_lock = threading.Lock()
+
+def start_background_scheduler(interval_seconds: int = None):
+    """
+    Starts background threads for telemetry ingestion and daily aggregation.
+    Can be safely called from app.py on server startup.
+    """
+    global _scheduler_started
+    with _scheduler_lock:
+        if _scheduler_started:
+            return
+        _scheduler_started = True
+        
+        poll_interval = interval_seconds if interval_seconds is not None else int(os.environ.get("TELEMETRY_POLL_INTERVAL", "20"))
+        t1 = threading.Thread(target=run_ingestion, args=(poll_interval,), daemon=True, name="TelemetryIngestionThread")
+        t2 = threading.Thread(target=run_aggregation_and_cleanup, daemon=True, name="TelemetryAggregationThread")
+        t1.start()
+        t2.start()
+        print(f"[Scheduler] Background scheduler initialized (poll interval: {poll_interval}s).")
+
 if __name__ == '__main__':
-    t1 = threading.Thread(target=run_ingestion, daemon=True)
-    t2 = threading.Thread(target=run_aggregation_and_cleanup, daemon=True)
-    
-    t1.start()
-    t2.start()
-    
+    start_background_scheduler()
     print("[Scheduler Process Started] Running telemetry ingestion and daily aggregation threads.")
     
     # Keep main thread alive

@@ -4,15 +4,15 @@ from data.supabase_client import supabase, get_device_thingspeak_config
 
 class ThingSpeakService:
     @staticmethod
-    def fetch_latest_feed(channel_id: str, api_key: str = None):
+    def fetch_latest_feed(channel_id: str, api_key: str = None, results: int = 1):
         """
-        Fetch the latest feed entry and channel metadata from ThingSpeak.
+        Fetch the latest feed entries and channel metadata from ThingSpeak.
         """
         if not channel_id:
             raise ValueError("ThingSpeak channel ID is required")
             
         url = f"https://api.thingspeak.com/channels/{channel_id}/feeds.json"
-        params = {"results": 1}
+        params = {"results": max(1, int(results))}
         if api_key:
             params["api_key"] = api_key
             
@@ -26,53 +26,66 @@ class ThingSpeakService:
             raise ValueError(f"HTTP request to ThingSpeak failed: {str(e)}")
 
     @staticmethod
-    def parse_and_map_data(data: dict):
+    def parse_and_map_feed(channel_info: dict, feed: dict):
         """
-        Parse JSON from ThingSpeak and dynamically map the response fields
-        based on the channel metadata, falling back to standard index positions.
+        Parse a single feed entry using channel metadata and sensible fallbacks.
         """
-        if not data or "channel" not in data or "feeds" not in data or not data["feeds"]:
-            raise ValueError("Empty or invalid response data structure received from ThingSpeak")
+        if not channel_info or not feed:
+            raise ValueError("Invalid feed or channel metadata")
             
-        channel_info = data["channel"]
-        feed = data["feeds"][0]
-        
-        # Look at metadata field labels to dynamically map fields
         field_mapping = {}
         for key, label in channel_info.items():
             if key.startswith("field") and isinstance(label, str):
                 label_lower = label.strip().lower()
-                if "temperature" in label_lower or "temp" in label_lower or "celsius" in label_lower or "celcius" in label_lower:
+                if any(k in label_lower for k in ["temperature", "temp", "celsius", "celcius"]):
                     field_mapping[key] = "temperature"
-                elif "humidity" in label_lower or "hum" in label_lower or "moisture" in label_lower:
+                elif any(k in label_lower for k in ["humidity", "hum", "moisture"]):
                     field_mapping[key] = "humidity"
-                elif "ammonia" in label_lower or "nh3" in label_lower or "gas" in label_lower or "ppm" in label_lower:
+                elif any(k in label_lower for k in ["ammonia", "nh3", "gas", "ppm"]):
                     field_mapping[key] = "ammonia"
-                elif "sound" in label_lower or "noise" in label_lower or "audio" in label_lower or "mic" in label_lower or "voice" in label_lower or "db" in label_lower:
+                elif any(k in label_lower for k in ["sound_url", "audiourl"]):
                     field_mapping[key] = "sound_url"
-                elif "image" in label_lower or "photo" in label_lower or "cam" in label_lower or "pic" in label_lower or "camera" in label_lower:
+                elif any(k in label_lower for k in ["image_url", "photourl", "camurl", "picurl"]):
                     field_mapping[key] = "image_url"
-                elif "device" in label_lower or "id" in label_lower or "mac" in label_lower or "node" in label_lower or "esp" in label_lower:
+                elif any(k in label_lower for k in ["sound", "noise", "audio", "db", "acoustic"]):
+                    field_mapping[key] = "sound_level"
+                elif any(k in label_lower for k in ["device_id", "deviceid", "node_id", "kit_id"]):
                     field_mapping[key] = "device_id"
 
-        # Fallback default positions if they weren't explicitly labeled in ThingSpeak metadata
+        # Baseline fallback mapping for standard 3-sensor kits
         default_mapping = {
             "field1": "temperature",
             "field2": "humidity",
             "field3": "ammonia",
-            "field4": "sound_url",
-            "field5": "image_url",
-            "field6": "device_id"
         }
-        
-        # Merge maps prioritizing channel-configured labels
         final_mapping = {**default_mapping, **field_mapping}
         
         parsed = {}
         for ts_field, standard_name in final_mapping.items():
             parsed[standard_name] = feed.get(ts_field)
             
+        # Only assign media URLs if the value is actually an HTTP/HTTPS URL
+        sound_val = str(parsed.get("sound_url") or "").strip()
+        parsed["sound_url"] = sound_val if sound_val.startswith(("http://", "https://")) else None
+
+        image_val = str(parsed.get("image_url") or "").strip()
+        parsed["image_url"] = image_val if image_val.startswith(("http://", "https://")) else None
+
         return parsed
+
+    @classmethod
+    def parse_and_map_data(cls, data: dict, feed_index: int = -1):
+        """
+        Parse JSON from ThingSpeak and dynamically map the response fields.
+        Defaults to the latest feed in the returned list.
+        """
+        if not data or "channel" not in data or "feeds" not in data or not data["feeds"]:
+            raise ValueError("Empty or invalid response data structure received from ThingSpeak")
+            
+        channel_info = data["channel"]
+        feeds = data["feeds"]
+        feed = feeds[feed_index] if abs(feed_index) <= len(feeds) else feeds[-1]
+        return cls.parse_and_map_feed(channel_info, feed)
 
     @staticmethod
     def validate_data(parsed: dict):
@@ -129,10 +142,25 @@ class ThingSpeakService:
         else:
             validated["ammonia"] = None
 
-        # Standardize strings
-        validated["sound_url"] = str(parsed.get("sound_url") or "").strip()
-        validated["image_url"] = str(parsed.get("image_url") or "").strip()
-        validated["device_id"] = str(parsed.get("device_id") or "").strip()
+        # Sound level validation
+        sound_val = parsed.get("sound_level")
+        if sound_val is not None and str(sound_val).strip() != "":
+            try:
+                validated["sound_level"] = max(0.0, float(sound_val))
+            except (TypeError, ValueError):
+                validated["sound_level"] = 50.0
+        else:
+            validated["sound_level"] = 50.0
+
+        # Standardize strings & URLs
+        sound_url_cand = str(parsed.get("sound_url") or "").strip()
+        validated["sound_url"] = sound_url_cand if sound_url_cand.startswith(("http://", "https://")) else None
+
+        image_url_cand = str(parsed.get("image_url") or "").strip()
+        validated["image_url"] = image_url_cand if image_url_cand.startswith(("http://", "https://")) else None
+
+        dev_cand = str(parsed.get("device_id") or "").strip()
+        validated["device_id"] = dev_cand if dev_cand else None
         
         return validated
 

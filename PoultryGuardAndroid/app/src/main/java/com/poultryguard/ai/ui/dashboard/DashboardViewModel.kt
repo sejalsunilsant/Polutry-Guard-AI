@@ -21,6 +21,7 @@ import com.poultryguard.ai.data.repository.MortalityRepository
 import com.poultryguard.ai.data.repository.BatchRepository
 import com.poultryguard.ai.data.mqtt.MqttManager
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -91,18 +92,33 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     )
 
     init {
-        cacheManager.clearCachedTelemetry()
         loadCachedData()
         loadInitialData()
+        startTelemetryPolling()
     }
 
     private fun loadCachedData() {
-        currentTemp = null
-        currentHumid = null
-        currentAmmonia = null
-        currentSound = null
-        
+        val cachedTel = cacheManager.getCachedTelemetry()
+        currentTemp = cachedTel["temp"]
+        currentHumid = cachedTel["humid"]
+        currentAmmonia = cachedTel["ammonia"]
+        currentSound = cachedTel["sound"]
+        if (currentTemp != null && currentTemp != 0f) {
+            activeMqttConnection = true
+        }
         activeBatch = cacheManager.getCachedActiveBatch()
+    }
+
+    private fun startTelemetryPolling() {
+        viewModelScope.launch {
+            while (isActive) {
+                delay(15000)
+                if (deviceId.isNotBlank()) {
+                    loadLatestTelemetry()
+                    loadLatestPrediction()
+                }
+            }
+        }
     }
 
     private fun loadInitialData() {
@@ -168,19 +184,38 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 unsyncedMortalities = batch?.let { batchRepository.getUnsyncedMortalityCount(it.id) } ?: 0
             }
             
-            delay(1000)
+            delay(500)
             setupMqtt()
             updateDashboardState()
+            loadLatestTelemetry()
             loadLatestPrediction()
         }
     }
 
+    fun loadLatestTelemetry() {
+        if (deviceId.isBlank()) return
+        viewModelScope.launch {
+            val result = diseaseRepository.getLatestTelemetry(deviceId)
+            result.onSuccess { tel ->
+                if (tel.temperature != null && tel.humidity != null) {
+                    currentTemp = tel.temperature
+                    currentHumid = tel.humidity
+                    currentAmmonia = tel.ammonia ?: 0f
+                    currentSound = tel.soundLevel ?: 50f
+                    activeMqttConnection = true
+                    cacheManager.cacheTelemetry(currentTemp, currentHumid, currentAmmonia, currentSound)
+                    updateDashboardState()
+                }
+            }
+        }
+    }
 
     fun loadLatestPrediction() {
         if (deviceId.isBlank() || activeBatch == null) return
         viewModelScope.launch {
             val result = diseaseRepository.getLatestPrediction(
-                deviceId = deviceId
+                deviceId = deviceId,
+                batchId = activeBatch?.id
             )
             result.onSuccess { prediction ->
                 if (activeBatch != null) {
@@ -354,9 +389,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 unsyncedMortalities = batch?.let { batchRepository.getUnsyncedMortalityCount(it.id) } ?: 0
             }
             
-            delay(800)
+            delay(500)
             _isRefreshing.value = false
             updateDashboardState()
+            loadLatestTelemetry()
             loadLatestPrediction()
         }
     }
@@ -488,7 +524,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getTempStatus(valFloat: Float?): SensorStatus {
-        if (valFloat == null || valFloat == 0f) return SensorStatus.IDEAL
+        if (valFloat == null || valFloat == 0f) return SensorStatus.WARNING
         return when {
             valFloat < 19f || valFloat > 30f -> SensorStatus.CRITICAL
             valFloat < 21f || valFloat > 27f -> SensorStatus.WARNING
@@ -497,7 +533,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getTempDescription(valFloat: Float?): String {
-        if (valFloat == null || valFloat == 0f) return "Sensor kit offline / No live telemetry (0.0 °C)"
+        if (valFloat == null || valFloat == 0f) return "Waiting for sensor telemetry..."
         return when (getTempStatus(valFloat)) {
             SensorStatus.IDEAL -> "Shed heat is in standard cozy broiler comfort range."
             SensorStatus.WARNING -> "Mild thermal variance. Keep monitoring ventilation."
@@ -506,7 +542,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getHumidStatus(valFloat: Float?): SensorStatus {
-        if (valFloat == null || valFloat == 0f) return SensorStatus.IDEAL
+        if (valFloat == null || valFloat == 0f) return SensorStatus.WARNING
         return when {
             valFloat < 45f || valFloat > 80f -> SensorStatus.CRITICAL
             valFloat < 50f || valFloat > 70f -> SensorStatus.WARNING
@@ -515,7 +551,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getHumidDescription(valFloat: Float?): String {
-        if (valFloat == null || valFloat == 0f) return "Sensor kit offline / No live telemetry (0.0 %)"
+        if (valFloat == null || valFloat == 0f) return "Waiting for sensor telemetry..."
         return when (getHumidStatus(valFloat)) {
             SensorStatus.IDEAL -> "Cohesive humidity level. Dampness check OK."
             SensorStatus.WARNING -> "Moderate dampness. Check air replacement cycles."
@@ -524,7 +560,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getAmmoniaStatus(valFloat: Float?): SensorStatus {
-        if (valFloat == null || valFloat == 0f) return SensorStatus.IDEAL
+        if (valFloat == null || valFloat == 0f) return SensorStatus.WARNING
         return when {
             valFloat >= 25f -> SensorStatus.CRITICAL
             valFloat >= 16f -> SensorStatus.WARNING
@@ -533,7 +569,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun getAmmoniaDescription(valFloat: Float?): String {
-        if (valFloat == null || valFloat == 0f) return "Sensor kit offline / No live telemetry (0.0 ppm)"
+        if (valFloat == null || valFloat == 0f) return "Waiting for sensor telemetry..."
         return when (getAmmoniaStatus(valFloat)) {
             SensorStatus.IDEAL -> "Ammonia is safe. Air quality is pristine."
             SensorStatus.WARNING -> "Slight gas buildup detected. Cycle exhaust fans."

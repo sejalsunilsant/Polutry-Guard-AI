@@ -27,6 +27,7 @@ def normalize_risk_level_for_client(risk_val):
 def get_latest_prediction_endpoint():
     try:
         device_id = request.args.get('deviceId')
+        batch_id = request.args.get('batchId')
         if not device_id:
             return jsonify({
                 'status': 'error',
@@ -34,7 +35,7 @@ def get_latest_prediction_endpoint():
             }), 400
             
         from data.supabase_client import get_last_prediction
-        pred = get_last_prediction(device_id)
+        pred = get_last_prediction(device_id, batch_id=batch_id)
         
         if not pred:
             # Return a default healthy response instead of 404 so Android app doesn't break on startup
@@ -52,6 +53,45 @@ def get_latest_prediction_endpoint():
         }), 200
     except Exception as e:
         print(f"[Prediction API] Error in get_latest_prediction_endpoint: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@prediction_bp.route('/telemetry/latest', methods=['GET'])
+def get_latest_telemetry_endpoint():
+    try:
+        device_id = request.args.get('deviceId')
+        if not device_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'deviceId is a required query parameter'
+            }), 400
+            
+        from data.supabase_client import get_last_telemetry
+        record = get_last_telemetry(device_id)
+        
+        if not record:
+            return jsonify({
+                'status': 'no_data',
+                'temperature': None,
+                'humidity': None,
+                'ammonia': None,
+                'sound_level': None,
+                'created_at': None,
+                'device_id': device_id
+            }), 200
+            
+        return jsonify({
+            'status': 'success',
+            'temperature': float(record.get('temperature', 0.0)),
+            'humidity': float(record.get('humidity', 0.0)),
+            'ammonia': float(record.get('ammonia', 0.0)),
+            'sound_level': float(record.get('sound_level', 50.0)),
+            'created_at': record.get('created_at'),
+            'device_id': record.get('device_id'),
+            'sound_url': record.get('sound_url'),
+            'image_url': record.get('image_url')
+        }), 200
+    except Exception as e:
+        print(f"[Telemetry API] Error in get_latest_telemetry_endpoint: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @prediction_bp.route('/predict-disease', methods=['POST'])

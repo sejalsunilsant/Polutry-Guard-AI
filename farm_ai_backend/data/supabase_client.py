@@ -180,8 +180,8 @@ def upload_media_from_url(url, bucket_name, folder, file_name):
     Downloads a file from url and uploads it to a Supabase Storage bucket.
     Returns the storage path (or public URL) of the uploaded file in Supabase.
     """
-    if not url or not (url.startswith("http://") or url.startswith("https://")):
-        return url
+    if not url or not (str(url).startswith("http://") or str(url).startswith("https://")):
+        return None
         
     # Check if already in Supabase storage
     if ".supabase.co" in url or "mock-supabase.co" in url:
@@ -219,7 +219,7 @@ def upload_media_from_url(url, bucket_name, folder, file_name):
         return public_url
     except Exception as e:
         print(f"[Supabase Storage Error] Failed to upload media from {url}: {e}")
-        return url # fallback to original URL on error
+        return None
 
 def save_telemetry(device_id, temperature, humidity, ammonia, sound_level, farm_id, sound_url=None, image_url=None, created_at=None):
     """
@@ -242,24 +242,32 @@ def save_telemetry(device_id, temperature, humidity, ammonia, sound_level, farm_
         ts = clean_and_parse_ts(created_at) if created_at else datetime.now(timezone.utc)
         ts_str = ts.strftime("%Y%m%d_%H%M%S")
         
-        if sound_url is not None:
-            file_ext = "wav"
-            if "." in sound_url.split("/")[-1]:
-                file_ext = sound_url.split("/")[-1].split(".")[-1].split("?")[0]
-            file_name = f"{device_id}_{ts_str}.{file_ext}"
-            data["sound_url"] = upload_media_from_url(sound_url, "poultry-media", "audio", file_name)
+        if sound_url:
+            sound_str = str(sound_url).strip()
+            if sound_str.startswith(("http://", "https://")):
+                file_ext = "wav"
+                if "." in sound_str.split("/")[-1]:
+                    file_ext = sound_str.split("/")[-1].split(".")[-1].split("?")[0]
+                file_name = f"{device_id}_{ts_str}.{file_ext}"
+                uploaded_sound = upload_media_from_url(sound_str, "poultry-media", "audio", file_name)
+                if uploaded_sound:
+                    data["sound_url"] = uploaded_sound
             
-        if image_url is not None:
-            file_ext = "jpg"
-            if "." in image_url.split("/")[-1]:
-                file_ext = image_url.split("/")[-1].split(".")[-1].split("?")[0]
-            file_name = f"{device_id}_{ts_str}.{file_ext}"
-            data["image_url"] = upload_media_from_url(image_url, "poultry-media", "images", file_name)
-            try:
-                from services.image_pipeline_service import ImagePipelineService
-                ImagePipelineService.mark_file_handled(f"images/{file_name}", data["image_url"])
-            except Exception:
-                pass
+        if image_url:
+            image_str = str(image_url).strip()
+            if image_str.startswith(("http://", "https://")):
+                file_ext = "jpg"
+                if "." in image_str.split("/")[-1]:
+                    file_ext = image_str.split("/")[-1].split(".")[-1].split("?")[0]
+                file_name = f"{device_id}_{ts_str}.{file_ext}"
+                uploaded_img = upload_media_from_url(image_str, "poultry-media", "images", file_name)
+                if uploaded_img:
+                    data["image_url"] = uploaded_img
+                    try:
+                        from services.image_pipeline_service import ImagePipelineService
+                        ImagePipelineService.mark_file_handled(f"images/{file_name}", data["image_url"])
+                    except Exception:
+                        pass
             
         if created_at is not None:
             data["created_at"] = created_at
@@ -398,19 +406,33 @@ def update_device_thingspeak_config(device_id, farm_id, channel_id, read_api_key
         return {"status": "error", "message": str(e)}
 
 
-def get_last_prediction(device_id):
+def get_last_prediction(device_id, batch_id=None):
     """
     Fetch the most recent disease prediction for a device.
+    Optionally scoped to a specific batch_id. If no batch_id is provided,
+    it automatically scopes to the active batch for the device's farm,
+    preventing stale predictions from past/sold batches from showing up.
     """
     if not supabase:
         return None
     try:
-        res = supabase.table("disease_predictions")\
+        query = supabase.table("disease_predictions")\
             .select("*")\
-            .eq("device_id", device_id)\
-            .order("created_at", desc=True)\
-            .limit(1)\
-            .execute()
+            .eq("device_id", device_id)
+
+        target_batch_id = batch_id
+        if not target_batch_id:
+            dev_res = supabase.table("devices").select("farm_id").eq("id", device_id).execute()
+            if dev_res.data:
+                farm_id = dev_res.data[0].get("farm_id")
+                active_batch = get_active_batch(farm_id)
+                if active_batch and active_batch.get("id"):
+                    target_batch_id = active_batch.get("id")
+
+        if target_batch_id:
+            query = query.eq("batch_id", target_batch_id)
+
+        res = query.order("created_at", desc=True).limit(1).execute()
         if res.data and len(res.data) > 0:
             return res.data[0]
         return None

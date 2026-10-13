@@ -138,9 +138,8 @@ def ingest_thingspeak():
         except ValueError as ve:
             return jsonify({'error': f"Failed to parse ThingSpeak data: {str(ve)}"}), 422
             
-        # Ensure device_id is correctly mapped/defaulted
-        if not parsed_data.get('device_id'):
-            parsed_data['device_id'] = device_id
+        # Ensure device_id is correctly set from request parameter
+        parsed_data['device_id'] = device_id
             
         # 4. Validate raw inputs
         try:
@@ -164,7 +163,7 @@ def ingest_thingspeak():
         engineered = engineer_sensor_features(temp, hum, ammonia)
         
         # Determine sound level from feed or default
-        sound_level = 50.0
+        sound_level = validated_data.get('sound_level', 50.0)
         
         # Extract media URLs
         sound_url = validated_data.get('sound_url')
@@ -172,6 +171,8 @@ def ingest_thingspeak():
 
         # 5.2 Store Telemetry to Supabase
         telemetry_id = None
+        feeds = feed_response.get("feeds", [])
+        feed_created_at = feeds[-1].get("created_at") if feeds else None
         try:
             telemetry_res = save_telemetry(
                 device_id=device_id,
@@ -181,7 +182,8 @@ def ingest_thingspeak():
                 sound_level=sound_level,
                 farm_id=farm_id,
                 sound_url=sound_url,
-                image_url=image_url
+                image_url=image_url,
+                created_at=feed_created_at
             )
             if telemetry_res and telemetry_res.get("status") == "success" and telemetry_res.get("data"):
                 telemetry_id = telemetry_res["data"][0].get("id")
