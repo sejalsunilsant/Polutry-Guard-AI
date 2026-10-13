@@ -24,7 +24,7 @@ class ImagePredictor:
     @classmethod
     def load_model(cls):
         """
-        Loads the Apurva ResNet18 PyTorch model lazily once (thread-safe singleton).
+        Loads the ResNet18 PyTorch model lazily once (thread-safe singleton).
         """
         if cls._model is not None:
             return "pytorch"

@@ -2,6 +2,7 @@ package com.poultryguard.ai.data.api
 
 import android.content.Context
 import com.poultryguard.ai.data.cache.LocalCacheManager
+import com.google.gson.annotations.SerializedName
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -28,6 +29,17 @@ data class DiseasePredictionResponse(
     val riskLevel: DiseaseRiskLevel,
     val confidence: Float,
     val recommendation: String
+)
+
+// Telemetry payload returned by Backend Telemetry API
+data class TelemetryResponse(
+    val status: String,
+    val temperature: Float?,
+    val humidity: Float?,
+    val ammonia: Float?,
+    @SerializedName("sound_level") val soundLevel: Float?,
+    @SerializedName("created_at") val createdAt: String?,
+    @SerializedName("device_id") val deviceId: String?
 )
 
 // Response layout returned by AI Sound classification engine
@@ -63,7 +75,13 @@ interface DiseasePredictionApi {
     suspend fun predictDisease(@Body request: DiseasePredictionRequest): DiseasePredictionResponse
 
     @GET("predictions/latest")
-    suspend fun getLatestPrediction(@Query("deviceId") deviceId: String): DiseasePredictionResponse
+    suspend fun getLatestPrediction(
+        @Query("deviceId") deviceId: String,
+        @Query("batchId") batchId: String? = null
+    ): DiseasePredictionResponse
+
+    @GET("telemetry/latest")
+    suspend fun getLatestTelemetry(@Query("deviceId") deviceId: String): TelemetryResponse
 
     @Multipart
     @POST("predict-sound")
@@ -120,10 +138,20 @@ class DiseasePredictionRepository(private val context: Context) {
         }
     }
 
-    suspend fun getLatestPrediction(deviceId: String): Result<DiseasePredictionResponse> {
+    suspend fun getLatestPrediction(deviceId: String, batchId: String? = null): Result<DiseasePredictionResponse> {
         return try {
             val api = getApi() ?: throw Exception("Retrofit API not initialized.")
-            val response = api.getLatestPrediction(deviceId)
+            val response = api.getLatestPrediction(deviceId, batchId)
+            Result.success(response)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getLatestTelemetry(deviceId: String): Result<TelemetryResponse> {
+        return try {
+            val api = getApi() ?: throw Exception("Retrofit API not initialized.")
+            val response = api.getLatestTelemetry(deviceId)
             Result.success(response)
         } catch (e: Exception) {
             Result.failure(e)
