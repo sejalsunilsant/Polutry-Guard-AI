@@ -1,0 +1,191 @@
+name: Farm AI Backend CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master_sejal ]
+    paths:
+      - 'farm_ai_backend/**'
+      - '.github/workflows/backend-ci-cd.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'farm_ai_backend/**'
+      - '.github/workflows/backend-ci-cd.yml'
+  workflow_dispatch:
+
+jobs:
+  # =========================================================================
+  # STAGE 1: Code Linting & Style Check
+  # =========================================================================
+  lint:
+    name: Lint & Code Style
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: farm_ai_backend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Linting Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+
+      - name: Check Syntax & Critical Errors
+        run: |
+          # Fails if syntax errors (E9, F63, F7, F82) exist in backend source code
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=tests,.venv
+
+  # =========================================================================
+  # STAGE 2: Automated Tests with Secrets from .env
+  # =========================================================================
+  test:
+    name: Run Backend Test Suite
+    runs-on: ubuntu-latest
+    needs: lint
+    defaults:
+      run:
+        working-directory: farm_ai_backend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install System Audio & Network Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsndfile1 ffmpeg curl
+
+      # -----------------------------------------------------------------------
+      # Populate .env file directly from GitHub Secrets
+      # Supports:
+      # 1) secrets.ENV_FILE (paste the entire .env file at once)
+      # 2) Individual secrets fallback (SUPABASE_URL, GROQ_API_KEY, etc.)
+      # -----------------------------------------------------------------------
+      - name: Create .env Configuration File
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          QDRANT_HOST: ${{ secrets.QDRANT_HOST }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          TELEMETRY_RETENTION_DAYS: ${{ secrets.TELEMETRY_RETENTION_DAYS }}
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+          WIFI_ENCRYPTION_KEY: ${{ secrets.WIFI_ENCRYPTION_KEY }}
+          THINGSPEAK_DEFAULT_CHANNEL_ID: ${{ secrets.THINGSPEAK_DEFAULT_CHANNEL_ID }}
+          THINGSPEAK_DEFAULT_READ_API_KEY: ${{ secrets.THINGSPEAK_DEFAULT_READ_API_KEY }}
+          SUPABASE_MEDIA_BUCKET: ${{ secrets.SUPABASE_MEDIA_BUCKET }}
+        run: |
+          if [ -n "$ENV_FILE_CONTENT" ]; then
+            echo "Populating .env directly from secrets.ENV_FILE..."
+            printf "%s\n" "$ENV_FILE_CONTENT" > .env
+          else
+            echo "Building .env from individual repository secrets..."
+            cat << 'EOF' > .env
+          TF_ENABLE_ONEDNN_OPTS=0
+          PORT=10000
+          HOST=0.0.0.0
+          FLASK_ENV=testing
+          EOF
+            [ -n "$SUPABASE_URL" ] && echo "SUPABASE_URL=$SUPABASE_URL" >> .env
+            [ -n "$SUPABASE_KEY" ] && echo "SUPABASE_KEY=$SUPABASE_KEY" >> .env
+            [ -n "$GROQ_API_KEY" ] && echo "GROQ_API_KEY=$GROQ_API_KEY" >> .env
+            [ -n "$QDRANT_HOST" ] && echo "QDRANT_HOST=$QDRANT_HOST" >> .env
+            [ -n "$QDRANT_API_KEY" ] && echo "QDRANT_API_KEY=$QDRANT_API_KEY" >> .env
+            [ -n "$TELEMETRY_RETENTION_DAYS" ] && echo "TELEMETRY_RETENTION_DAYS=$TELEMETRY_RETENTION_DAYS" >> .env
+            [ -n "$FIREBASE_SERVICE_ACCOUNT_KEY" ] && echo "FIREBASE_SERVICE_ACCOUNT_KEY=$FIREBASE_SERVICE_ACCOUNT_KEY" >> .env || echo "FIREBASE_SERVICE_ACCOUNT_KEY=serviceAccountKey.json" >> .env
+            [ -n "$WIFI_ENCRYPTION_KEY" ] && echo "WIFI_ENCRYPTION_KEY=$WIFI_ENCRYPTION_KEY" >> .env
+            [ -n "$THINGSPEAK_DEFAULT_CHANNEL_ID" ] && echo "THINGSPEAK_DEFAULT_CHANNEL_ID=$THINGSPEAK_DEFAULT_CHANNEL_ID" >> .env
+            [ -n "$THINGSPEAK_DEFAULT_READ_API_KEY" ] && echo "THINGSPEAK_DEFAULT_READ_API_KEY=$THINGSPEAK_DEFAULT_READ_API_KEY" >> .env
+            [ -n "$SUPABASE_MEDIA_BUCKET" ] && echo "SUPABASE_MEDIA_BUCKET=$SUPABASE_MEDIA_BUCKET" >> .env
+          fi
+          echo ".env generated successfully (hidden for security)."
+
+      - name: Inject Firebase Service Account Credentials JSON (if provided)
+        env:
+          FIREBASE_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY_JSON }}
+        run: |
+          if [ -n "$FIREBASE_JSON" ]; then
+            echo "$FIREBASE_JSON" > serviceAccountKey.json
+            echo "Firebase service account JSON saved as serviceAccountKey.json"
+          fi
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Install CPU-optimized PyTorch matching production Dockerfile
+          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+          pip install --no-cache-dir -r requirements.txt
+
+      - name: Execute Unified Backend Test Suite
+        run: |
+          python tests/run_all_tests.py
+
+  # =========================================================================
+  # STAGE 3: Docker Build & Verification
+  # =========================================================================
+  docker-build:
+    name: Build & Verify Production Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./farm_ai_backend
+          file: ./farm_ai_backend/Dockerfile
+          push: false
+          tags: poultryguard-farm-ai-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # =========================================================================
+  # STAGE 4: Continuous Deployment (CD to Render)
+  # Runs ONLY on push/merge to 'main'
+  # =========================================================================
+  deploy:
+    name: Continuous Deployment (Render)
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Trigger Render Deployment via Deploy Hook
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "::notice ::RENDER_DEPLOY_HOOK_URL secret not configured. Skipping automated release."
+          else
+            echo "Triggering deployment on Render..."
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}")
+            HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            echo "Deploy hook response (HTTP $HTTP_STATUS): $BODY"
+            if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+              echo "Deployment successfully triggered on Render!"
+            else
+              echo "::error ::Render Deploy Hook returned HTTP status $HTTP_STATUS"
+              exit 1
+            fi
+          fi
