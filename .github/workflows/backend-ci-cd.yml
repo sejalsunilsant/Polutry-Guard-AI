@@ -91,30 +91,61 @@ jobs:
           THINGSPEAK_DEFAULT_READ_API_KEY: ${{ secrets.THINGSPEAK_DEFAULT_READ_API_KEY }}
           SUPABASE_MEDIA_BUCKET: ${{ secrets.SUPABASE_MEDIA_BUCKET }}
         run: |
-          if [ -n "$ENV_FILE_CONTENT" ]; then
-            echo "Populating .env directly from secrets.ENV_FILE..."
-            printf "%s\n" "$ENV_FILE_CONTENT" > .env
-          else
-            echo "Building .env from individual repository secrets..."
-            cat << 'EOF' > .env
-          TF_ENABLE_ONEDNN_OPTS=0
-          PORT=10000
-          HOST=0.0.0.0
-          FLASK_ENV=testing
-          EOF
-            [ -n "$SUPABASE_URL" ] && echo "SUPABASE_URL=$SUPABASE_URL" >> .env
-            [ -n "$SUPABASE_KEY" ] && echo "SUPABASE_KEY=$SUPABASE_KEY" >> .env
-            [ -n "$GROQ_API_KEY" ] && echo "GROQ_API_KEY=$GROQ_API_KEY" >> .env
-            [ -n "$QDRANT_HOST" ] && echo "QDRANT_HOST=$QDRANT_HOST" >> .env
-            [ -n "$QDRANT_API_KEY" ] && echo "QDRANT_API_KEY=$QDRANT_API_KEY" >> .env
-            [ -n "$TELEMETRY_RETENTION_DAYS" ] && echo "TELEMETRY_RETENTION_DAYS=$TELEMETRY_RETENTION_DAYS" >> .env
-            [ -n "$FIREBASE_SERVICE_ACCOUNT_KEY" ] && echo "FIREBASE_SERVICE_ACCOUNT_KEY=$FIREBASE_SERVICE_ACCOUNT_KEY" >> .env || echo "FIREBASE_SERVICE_ACCOUNT_KEY=serviceAccountKey.json" >> .env
-            [ -n "$WIFI_ENCRYPTION_KEY" ] && echo "WIFI_ENCRYPTION_KEY=$WIFI_ENCRYPTION_KEY" >> .env
-            [ -n "$THINGSPEAK_DEFAULT_CHANNEL_ID" ] && echo "THINGSPEAK_DEFAULT_CHANNEL_ID=$THINGSPEAK_DEFAULT_CHANNEL_ID" >> .env
-            [ -n "$THINGSPEAK_DEFAULT_READ_API_KEY" ] && echo "THINGSPEAK_DEFAULT_READ_API_KEY=$THINGSPEAK_DEFAULT_READ_API_KEY" >> .env
-            [ -n "$SUPABASE_MEDIA_BUCKET" ] && echo "SUPABASE_MEDIA_BUCKET=$SUPABASE_MEDIA_BUCKET" >> .env
-          fi
-          echo ".env generated successfully (hidden for security)."
+          python - << 'PY_EOF'
+          import os
+
+          env_file_raw = os.environ.get("ENV_FILE_CONTENT", "")
+          parsed_vars = {}
+
+          if env_file_raw.strip():
+              print("[CI Setup] Parsing .env from secrets.ENV_FILE...")
+              for raw_line in env_file_raw.splitlines():
+                  line = raw_line.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  if "=" in line:
+                      k, v = line.split("=", 1)
+                      clean_k = k.strip()
+                      clean_v = v.strip().strip('"').strip("'")
+                      if clean_k:
+                          parsed_vars[clean_k] = clean_v
+          else:
+              print("[CI Setup] Falling back to individual secrets...")
+              candidate_keys = [
+                  "SUPABASE_URL", "SUPABASE_KEY", "GROQ_API_KEY",
+                  "QDRANT_HOST", "QDRANT_API_KEY", "TELEMETRY_RETENTION_DAYS",
+                  "FIREBASE_SERVICE_ACCOUNT_KEY", "WIFI_ENCRYPTION_KEY",
+                  "THINGSPEAK_DEFAULT_CHANNEL_ID", "THINGSPEAK_DEFAULT_READ_API_KEY",
+                  "SUPABASE_MEDIA_BUCKET"
+              ]
+              for k in candidate_keys:
+                  val = os.environ.get(k)
+                  if val:
+                      parsed_vars[k] = val.strip().strip('"').strip("'")
+
+          # Defaults for testing environment
+          parsed_vars.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+          parsed_vars.setdefault("FLASK_ENV", "testing")
+          parsed_vars.setdefault("PORT", "10000")
+          parsed_vars.setdefault("HOST", "0.0.0.0")
+
+          # Format normalized lines
+          lines = [f"{k}={v}" for k, v in parsed_vars.items()]
+
+          # Save to both backend directory and project root directory
+          for dest in [".env", "../.env"]:
+              with open(dest, "w", encoding="utf-8") as f:
+                  f.write("\n".join(lines) + "\n")
+              print(f"[CI Setup] Written normalized .env to: {os.path.abspath(dest)}")
+
+          # Export to GITHUB_ENV so all test processes automatically inherit variables
+          github_env = os.environ.get("GITHUB_ENV")
+          if github_env and os.path.exists(github_env):
+              with open(github_env, "a", encoding="utf-8") as f:
+                  for k, v in parsed_vars.items():
+                      f.write(f"{k}={v}\n")
+              print("[CI Setup] Exported environment variables to GITHUB_ENV successfully.")
+          PY_EOF
 
       - name: Inject Firebase Service Account Credentials JSON (if provided)
         env:
@@ -122,7 +153,8 @@ jobs:
         run: |
           if [ -n "$FIREBASE_JSON" ]; then
             echo "$FIREBASE_JSON" > serviceAccountKey.json
-            echo "Firebase service account JSON saved as serviceAccountKey.json"
+            echo "$FIREBASE_JSON" > sant-s-room-firebase-adminsdk-fbsvc-57fbc76709.json
+            echo "Firebase service account JSON written successfully."
           fi
 
       - name: Install Python Dependencies

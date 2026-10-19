@@ -54,12 +54,13 @@ _thread_local = threading.local()
 
 class SupabaseProxy:
     def _get_client(self):
-        active_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or key
+        active_url = (os.environ.get("SUPABASE_URL") or url or "").strip()
+        active_key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_KEY") or key or "").strip()
         if not hasattr(_thread_local, "client") or _thread_local.client is None:
             _thread_local.client = None
-            if url and active_key and url != "your_supabase_url" and active_key != "your_supabase_anon_key":
+            if active_url and active_key and active_url != "your_supabase_url" and active_key != "your_supabase_anon_key":
                 try:
-                    _thread_local.client = create_client(url, active_key)
+                    _thread_local.client = create_client(active_url, active_key)
                 except Exception as e:
                     print(f"[Supabase] Error initializing client for thread {threading.get_ident()}: {e}")
         

@@ -65,21 +65,22 @@ class TestImageWatcherLifecycle(unittest.TestCase):
         """Verify watcher ignores known baseline images and triggers only on newly added images."""
         ImagePipelineService._seen_files = {"images/img_existing_1.jpg", "images/img_existing_2.jpg"}
 
-        # Case 1: Storage returns only existing images -> 0 new images processed
-        with patch.object(ImagePipelineService, 'list_all_storage_images', return_value=["images/img_existing_1.jpg", "images/img_existing_2.jpg"]):
-            with patch.object(ImagePipelineService, 'process_single_image') as mock_process:
-                results = ImagePipelineService.check_and_process_new_images()
-                self.assertEqual(len(results), 0)
-                mock_process.assert_not_called()
+        with patch('services.image_pipeline_service.supabase', True):
+            # Case 1: Storage returns only existing images -> 0 new images processed
+            with patch.object(ImagePipelineService, 'list_all_storage_images', return_value=["images/img_existing_1.jpg", "images/img_existing_2.jpg"]):
+                with patch.object(ImagePipelineService, 'process_single_image') as mock_process:
+                    results = ImagePipelineService.check_and_process_new_images()
+                    self.assertEqual(len(results), 0)
+                    mock_process.assert_not_called()
 
-        # Case 2: A genuinely new image is uploaded -> triggers prediction for ONLY that new image
-        new_img = "images/camera_new_upload_2026.jpg"
-        with patch.object(ImagePipelineService, 'list_all_storage_images', return_value=["images/img_existing_1.jpg", "images/img_existing_2.jpg", new_img]):
-            with patch.object(ImagePipelineService, 'process_single_image', return_value={"status": "success", "file_path": new_img}) as mock_process:
-                results = ImagePipelineService.check_and_process_new_images()
-                self.assertEqual(len(results), 1)
-                mock_process.assert_called_once_with(new_img)
-                self.assertIn(new_img, ImagePipelineService._seen_files)
+            # Case 2: A genuinely new image is uploaded -> triggers prediction for ONLY that new image
+            new_img = "images/camera_new_upload_2026.jpg"
+            with patch.object(ImagePipelineService, 'list_all_storage_images', return_value=["images/img_existing_1.jpg", "images/img_existing_2.jpg", new_img]):
+                with patch.object(ImagePipelineService, 'process_single_image', return_value={"status": "success", "file_path": new_img}) as mock_process:
+                    results = ImagePipelineService.check_and_process_new_images()
+                    self.assertEqual(len(results), 1)
+                    mock_process.assert_called_once_with(new_img)
+                    self.assertIn(new_img, ImagePipelineService._seen_files)
 
     def test_mark_file_handled(self):
         """Verify mark_file_handled registers file path so it will not be re-processed."""
@@ -112,7 +113,8 @@ class TestImageWatcherLifecycle(unittest.TestCase):
         Verify that processing an image stores status in DB and a repeated attempt
         (due to webhook retry or worker reload) NEVER re-invokes the ML model.
         """
-        unique_file = "farm_x/shed_y/idempotent_test_001.jpg"
+        import uuid
+        unique_file = f"farm_x/shed_y/idempotent_test_{uuid.uuid4().hex[:8]}.jpg"
         fake_bytes = b"fake_jpeg_image_bytes_123"
 
         # Mock download and prediction
@@ -151,7 +153,8 @@ class TestImageWatcherLifecycle(unittest.TestCase):
         Simulate backend restart or Gunicorn worker respawn where in-memory sets are empty.
         The DB status must be respected and prevent re-prediction.
         """
-        restarted_file = "farm_x/shed_y/after_restart_test_002.jpg"
+        import uuid
+        restarted_file = f"farm_x/shed_y/after_restart_test_{uuid.uuid4().hex[:8]}.jpg"
 
         # Record as completed in DB
         save_image_prediction_status(
@@ -181,7 +184,8 @@ class TestImageWatcherLifecycle(unittest.TestCase):
         """
         Verify database claim lock prevents two concurrent requests from processing the same image.
         """
-        race_file = "farm_x/shed_y/concurrent_race_test.jpg"
+        import uuid
+        race_file = f"farm_x/shed_y/concurrent_race_test_{uuid.uuid4().hex[:8]}.jpg"
 
         # Worker 1 claims
         claimed_1, _ = claim_image_for_processing(race_file)
