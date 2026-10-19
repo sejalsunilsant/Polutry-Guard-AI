@@ -1,0 +1,224 @@
+name: Farm AI Backend CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master_sejal ]
+    paths:
+      - 'farm_ai_backend/**'
+      - '.github/workflows/backend-ci-cd.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'farm_ai_backend/**'
+      - '.github/workflows/backend-ci-cd.yml'
+  workflow_dispatch:
+
+jobs:
+  # =========================================================================
+  # STAGE 1: Code Linting & Style Check
+  # =========================================================================
+  lint:
+    name: Lint & Code Style
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: farm_ai_backend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Linting Tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+
+      - name: Check Syntax & Critical Errors
+        run: |
+          # Fails if syntax errors (E9, F63, F7, F82) exist in backend source code
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=tests,.venv
+
+  # =========================================================================
+  # STAGE 2: Automated Tests with Secrets from .env
+  # =========================================================================
+  test:
+    name: Run Backend Test Suite
+    runs-on: ubuntu-latest
+    needs: lint
+    defaults:
+      run:
+        working-directory: farm_ai_backend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install System Audio & Network Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsndfile1 ffmpeg curl
+
+      # -----------------------------------------------------------------------
+      # Populate .env file directly from GitHub Secrets
+      # Supports:
+      # 1) secrets.ENV_FILE (paste the entire .env file at once)
+      # 2) Individual secrets fallback (SUPABASE_URL, GROQ_API_KEY, etc.)
+      # Sanitizes Windows CRLF and exports directly to $GITHUB_ENV
+      # -----------------------------------------------------------------------
+      - name: Create .env Configuration File
+        env:
+          ENV_FILE_CONTENT: ${{ secrets.ENV_FILE }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          QDRANT_HOST: ${{ secrets.QDRANT_HOST }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          TELEMETRY_RETENTION_DAYS: ${{ secrets.TELEMETRY_RETENTION_DAYS }}
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+          WIFI_ENCRYPTION_KEY: ${{ secrets.WIFI_ENCRYPTION_KEY }}
+          THINGSPEAK_DEFAULT_CHANNEL_ID: ${{ secrets.THINGSPEAK_DEFAULT_CHANNEL_ID }}
+          THINGSPEAK_DEFAULT_READ_API_KEY: ${{ secrets.THINGSPEAK_DEFAULT_READ_API_KEY }}
+          SUPABASE_MEDIA_BUCKET: ${{ secrets.SUPABASE_MEDIA_BUCKET }}
+        run: |
+          python - << 'PY_EOF'
+          import os
+
+          env_file_raw = os.environ.get("ENV_FILE_CONTENT", "")
+          parsed_vars = {}
+
+          if env_file_raw.strip():
+              print("[CI Setup] Parsing .env from secrets.ENV_FILE...")
+              for raw_line in env_file_raw.splitlines():
+                  line = raw_line.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  if "=" in line:
+                      k, v = line.split("=", 1)
+                      clean_k = k.strip()
+                      clean_v = v.strip().strip('"').strip("'")
+                      if clean_k:
+                          parsed_vars[clean_k] = clean_v
+          else:
+              print("[CI Setup] Falling back to individual secrets...")
+              candidate_keys = [
+                  "SUPABASE_URL", "SUPABASE_KEY", "GROQ_API_KEY",
+                  "QDRANT_HOST", "QDRANT_API_KEY", "TELEMETRY_RETENTION_DAYS",
+                  "FIREBASE_SERVICE_ACCOUNT_KEY", "WIFI_ENCRYPTION_KEY",
+                  "THINGSPEAK_DEFAULT_CHANNEL_ID", "THINGSPEAK_DEFAULT_READ_API_KEY",
+                  "SUPABASE_MEDIA_BUCKET"
+              ]
+              for k in candidate_keys:
+                  val = os.environ.get(k)
+                  if val:
+                      parsed_vars[k] = val.strip().strip('"').strip("'")
+
+          # Defaults for testing environment
+          parsed_vars.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+          parsed_vars.setdefault("FLASK_ENV", "testing")
+          parsed_vars.setdefault("PORT", "10000")
+          parsed_vars.setdefault("HOST", "0.0.0.0")
+
+          # Format normalized lines
+          lines = [f"{k}={v}" for k, v in parsed_vars.items()]
+
+          # Save to both backend directory and project root directory
+          for dest in [".env", "../.env"]:
+              with open(dest, "w", encoding="utf-8") as f:
+                  f.write("\n".join(lines) + "\n")
+              print(f"[CI Setup] Written normalized .env to: {os.path.abspath(dest)}")
+
+          # Export to GITHUB_ENV so all test processes automatically inherit variables
+          github_env = os.environ.get("GITHUB_ENV")
+          if github_env and os.path.exists(github_env):
+              with open(github_env, "a", encoding="utf-8") as f:
+                  for k, v in parsed_vars.items():
+                      f.write(f"{k}={v}\n")
+              print("[CI Setup] Exported environment variables to GITHUB_ENV successfully.")
+          PY_EOF
+
+      - name: Inject Firebase Service Account Credentials JSON (if provided)
+        env:
+          FIREBASE_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY_JSON }}
+        run: |
+          if [ -n "$FIREBASE_JSON" ]; then
+            echo "$FIREBASE_JSON" > serviceAccountKey.json
+            echo "$FIREBASE_JSON" > sant-s-room-firebase-adminsdk-fbsvc-57fbc76709.json
+            echo "Firebase service account JSON written successfully."
+          fi
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Install CPU-optimized PyTorch matching production Dockerfile
+          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+          pip install --no-cache-dir -r requirements.txt
+
+      - name: Execute Unified Backend Test Suite
+        run: |
+          python tests/run_all_tests.py
+
+  # =========================================================================
+  # STAGE 3: Docker Build & Verification
+  # =========================================================================
+  docker-build:
+    name: Build & Verify Production Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./farm_ai_backend
+          file: ./farm_ai_backend/Dockerfile
+          push: false
+          tags: poultryguard-farm-ai-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # =========================================================================
+  # STAGE 4: Continuous Deployment (CD to Render)
+  # Runs ONLY on push/merge to 'main'
+  # =========================================================================
+  deploy:
+    name: Continuous Deployment (Render)
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Trigger Render Deployment via Deploy Hook
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" ]; then
+            echo "::notice ::RENDER_DEPLOY_HOOK_URL secret not configured. Skipping automated release."
+          else
+            echo "Triggering deployment on Render..."
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}")
+            HTTP_STATUS=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+            echo "Deploy hook response (HTTP $HTTP_STATUS): $BODY"
+            if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+              echo "Deployment successfully triggered on Render!"
+            else
+              echo "::error ::Render Deploy Hook returned HTTP status $HTTP_STATUS"
+              exit 1
+            fi
+          fi

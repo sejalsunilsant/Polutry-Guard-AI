@@ -8,9 +8,10 @@ backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-# Load env vars from project root
-dotenv_path = os.path.abspath(os.path.join(backend_dir, "..", ".env"))
-load_dotenv(dotenv_path)
+# Load env vars from backend or project root
+for candidate_env in [os.path.abspath(os.path.join(backend_dir, ".env")), os.path.abspath(os.path.join(backend_dir, "..", ".env"))]:
+    if os.path.exists(candidate_env):
+        load_dotenv(candidate_env)
 
 from data.supabase_client import (
     supabase,

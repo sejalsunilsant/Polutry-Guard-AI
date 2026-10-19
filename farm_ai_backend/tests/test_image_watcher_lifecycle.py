@@ -65,21 +65,22 @@ class TestImageWatcherLifecycle(unittest.TestCase):
         """Verify watcher ignores known baseline images and triggers only on newly added images."""
         ImagePipelineService._seen_files = {"images/img_existing_1.jpg", "images/img_existing_2.jpg"}
 
-        # Case 1: Storage returns only existing images -> 0 new images processed
-        with patch.object(ImagePipelineService, 'list_all_storage_images', return_value=["images/img_existing_1.jpg", "images/img_existing_2.jpg"]):
-            with patch.object(ImagePipelineService, 'process_single_image') as mock_process:
-                results = ImagePipelineService.check_and_process_new_images()
-                self.assertEqual(len(results), 0)
-                mock_process.assert_not_called()
+        with patch('services.image_pipeline_service.supabase', True):
+            # Case 1: Storage returns only existing images -> 0 new images processed
+            with patch.object(ImagePipelineService, 'list_all_storage_images', return_value=["images/img_existing_1.jpg", "images/img_existing_2.jpg"]):
+                with patch.object(ImagePipelineService, 'process_single_image') as mock_process:
+                    results = ImagePipelineService.check_and_process_new_images()
+                    self.assertEqual(len(results), 0)
+                    mock_process.assert_not_called()
 
-        # Case 2: A genuinely new image is uploaded -> triggers prediction for ONLY that new image
-        new_img = "images/camera_new_upload_2026.jpg"
-        with patch.object(ImagePipelineService, 'list_all_storage_images', return_value=["images/img_existing_1.jpg", "images/img_existing_2.jpg", new_img]):
-            with patch.object(ImagePipelineService, 'process_single_image', return_value={"status": "success", "file_path": new_img}) as mock_process:
-                results = ImagePipelineService.check_and_process_new_images()
-                self.assertEqual(len(results), 1)
-                mock_process.assert_called_once_with(new_img)
-                self.assertIn(new_img, ImagePipelineService._seen_files)
+            # Case 2: A genuinely new image is uploaded -> triggers prediction for ONLY that new image
+            new_img = "images/camera_new_upload_2026.jpg"
+            with patch.object(ImagePipelineService, 'list_all_storage_images', return_value=["images/img_existing_1.jpg", "images/img_existing_2.jpg", new_img]):
+                with patch.object(ImagePipelineService, 'process_single_image', return_value={"status": "success", "file_path": new_img}) as mock_process:
+                    results = ImagePipelineService.check_and_process_new_images()
+                    self.assertEqual(len(results), 1)
+                    mock_process.assert_called_once_with(new_img)
+                    self.assertIn(new_img, ImagePipelineService._seen_files)
 
     def test_mark_file_handled(self):
         """Verify mark_file_handled registers file path so it will not be re-processed."""
