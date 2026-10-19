@@ -75,7 +75,6 @@ jobs:
       # Supports:
       # 1) secrets.ENV_FILE (paste the entire .env file at once)
       # 2) Individual secrets fallback (SUPABASE_URL, GROQ_API_KEY, etc.)
-      # Sanitizes Windows CRLF and exports directly to $GITHUB_ENV
       # -----------------------------------------------------------------------
       - name: Create .env Configuration File
         env:
